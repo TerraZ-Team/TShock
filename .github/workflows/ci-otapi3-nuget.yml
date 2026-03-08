@@ -36,4 +36,4 @@ jobs:
         run: dotnet pack TShockAPI/TShockAPI.csproj --configuration Release --no-build
 
       - name: Push TZ.TShockAPI
-        run: dotnet nuget push "TShockAPI/bin/Release/TZ.TShockAPI.*.nupkg" --api-key "${{ secrets.NUGET_API_KEY }}" --source https://api.nuget.org/v3/index.json --skip-duplicate
+        run: dotnet nuget push TShockAPI/bin/Release/TZ.TShockAPI.*.nupkg --api-key "${{ secrets.NUGET_API_KEY }}" --source https://api.nuget.org/v3/index.json --skip-duplicate
