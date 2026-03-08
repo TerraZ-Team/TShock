@@ -2,12 +2,12 @@ name: Publish NuGet
 
 on:
   push:
-    branches: [ nuget-release ]
+    branches: [ general-devel ]
   workflow_dispatch:
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
+  publish:
+    runs-on: windows-latest
     environment: release
 
     steps:
@@ -33,7 +33,13 @@ jobs:
         run: dotnet test TShock.sln --no-build --verbosity normal --configuration Release
 
       - name: Pack TZ.TShockAPI
-        run: dotnet pack TShockAPI/TShockAPI.csproj --configuration Release --no-build
+        run: dotnet pack TShockAPI/TShockAPI.csproj --configuration Release --no-build --output artifacts/nuget
 
       - name: Push TZ.TShockAPI
-        run: dotnet nuget push TShockAPI/bin/Release/TZ.TShockAPI.*.nupkg --api-key "${{ secrets.NUGET_API_KEY }}" --source https://api.nuget.org/v3/index.json --skip-duplicate
+        shell: pwsh
+        run: |
+          $package = Get-ChildItem artifacts/nuget/TZ.TShockAPI.*.nupkg | Select-Object -First 1
+          if (-not $package) {
+            throw "TZ.TShockAPI package was not produced."
+          }
+          dotnet nuget push $package.FullName --api-key "${{ secrets.NUGET_API_KEY }}" --source https://api.nuget.org/v3/index.json --skip-duplicate
