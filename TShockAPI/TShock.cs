@@ -64,7 +64,7 @@ namespace TShockAPI
 		/// <summary>VersionNum - The version number the TerrariaAPI will return back to the API. We just use the Assembly info.</summary>
 		public static readonly Version VersionNum = Assembly.GetExecutingAssembly().GetName().Version;
 		/// <summary>VersionCodename - The version codename is displayed when the server starts. Inspired by software codenames conventions.</summary>
-		public static readonly string VersionCodename = "Hopefully SSC works somewhat correctly now edition";
+		public static readonly string VersionCodename = "Profoundly Collaborative";
 
 		/// <summary>SavePath - This is the path TShock saves its data in. This path is relative to the TerrariaServer.exe (not in ServerPlugins).</summary>
 		public static string SavePath = "tshock";
@@ -315,7 +315,7 @@ namespace TShockAPI
 			catch (Exception ex)
 			{
 				// Will be handled by the server api and written to its crashlog.txt.
-				throw new Exception("Fatal TShock initialization exception. See inner exception for details.", ex);
+				throw new Exception(GetString("Fatal TShock initialization exception. See inner exception for details."), ex);
 			}
 
 			// Further exceptions are written to TShock's log from now on.
@@ -844,7 +844,7 @@ namespace TShockAPI
 						else
 						{
 							// The server should not start up if this argument is invalid.
-							throw new InvalidOperationException("Invalid value given for command line argument \"-ip\".");
+							throw new InvalidOperationException(GetString("Invalid value given for command line argument \"-ip\"."));
 						}
 					})
 
@@ -872,7 +872,7 @@ namespace TShockAPI
 							worldEvil = 1;
 							break;
 						default:
-							throw new InvalidOperationException("Invalid value given for command line argument \"-worldevil\".");
+							throw new InvalidOperationException(GetString("Invalid value given for command line argument \"-worldevil\"."));
 					}
 
 					ServerApi.LogWriter.PluginWriteLine(this, GetString("New worlds will be generated with the {0} world evil type!", value), TraceLevel.Verbose);
@@ -1164,6 +1164,34 @@ namespace TShockAPI
 
 						player.TeleportSpawnpoint();
 						TShock.Log.ConsoleDebug(GetString("OnSecondUpdate / initial ssc spawn for {0} at ({1}, {2})", player.Name, player.TPlayer.SpawnX, player.TPlayer.SpawnY));
+					}
+
+					// If a client didn't send a team change within 5 seconds of a pending team change from spawning, they're likely hacking.
+					// So we clear this flag to remove their one-time free team change.
+					if (player.InitialTeamChangePending && (DateTime.UtcNow - player.LastPvPTeamChange).TotalSeconds >= 5)
+						player.InitialTeamChangePending = false;
+
+					// We need to make sure the pvp mode is enforced properly. Maybe this should be moved elsewhere?
+					string pvpMode = Config.Settings.PvPMode.ToLowerInvariant();
+					if (pvpMode != PvPModes.Normal)
+					{
+						if (pvpMode == PvPModes.Disabled && player.TPlayer.hostile) // player shouldn't be in pvp
+						{
+							player.TPlayer.hostile = false;
+							NetMessage.SendData((int)PacketTypes.TogglePvp, -1, -1, null, player.Index);
+						}
+
+						if ((pvpMode == PvPModes.Always || pvpMode == PvPModes.PvPWithNoTeam) && !player.TPlayer.hostile) // player isn't in pvp when they should be
+						{
+							player.TPlayer.hostile = true;
+							NetMessage.SendData((int)PacketTypes.TogglePvp, -1, -1, null, player.Index);
+						}
+
+						if (pvpMode == PvPModes.PvPWithNoTeam && player.Team != PlayerTeamID.None) // player is on a team when they shouldn't be
+						{
+							player.TPlayer.team = PlayerTeamID.None;
+							NetMessage.SendData((int)PacketTypes.PlayerTeam, -1, -1, NetworkText.Empty, player.Index);
+						}
 					}
 
 					if (player.RPPending > 0)
@@ -1604,7 +1632,7 @@ namespace TShockAPI
 					//Send the original sender their nicely formatted message, and do all the loggy things
 					tsplr.SendMessage(msg, tsplr.Group.R, tsplr.Group.G, tsplr.Group.B);
 					TSPlayer.Server.SendMessage(msg, tsplr.Group.R, tsplr.Group.G, tsplr.Group.B);
-					Log.Info("Broadcast: {0}", msg);
+					Log.Info(GetString("Broadcast: {0}", msg));
 					args.Handled = true;
 				}
 			}
@@ -1666,7 +1694,7 @@ namespace TShockAPI
 			}
 			return chatMsg;
 		}
-    
+
 		private static readonly HashSet<PacketTypes> AllowedEarlyPackets =
 		[
 			PacketTypes.ConnectRequest,
@@ -1755,7 +1783,7 @@ namespace TShockAPI
 			player.SendFileTextAsMessage(FileTools.MotdPath);
 
 			string pvpMode = Config.Settings.PvPMode.ToLowerInvariant();
-			if (pvpMode == "always" || pvpMode == "pvpwithnoteam")
+			if (pvpMode is PvPModes.Always or PvPModes.PvPWithNoTeam)
 			{
 				player.TPlayer.hostile = true;
 				player.SendData(PacketTypes.TogglePvp, "", player.Index);

@@ -29,6 +29,7 @@ using Terraria.GameContent.Tile_Entities;
 using Terraria.ID;
 using Terraria.Localization;
 using TShockAPI.Models.PlayerUpdate;
+using TShockAPI.Configuration;
 
 namespace TShockAPI
 {
@@ -145,7 +146,8 @@ namespace TShockAPI
 					{ PacketTypes.SyncLoadout, HandleSyncLoadout },
 					{ PacketTypes.SyncItemCannotBeTakenByEnemies, HandleItemDrop },
 					{ PacketTypes.SpectatePlayer, HandleSyncPlayerSpectating },
-					{ PacketTypes.TeamChangeFromUI, HandlePlayerTeam } // Packet sent when changing team via UI.
+					{ PacketTypes.TeamChangeFromUI, HandlePlayerTeam }, // Same packet as PlayerTeam
+					{ PacketTypes.TEDeadCellsDisplayJar, HandleDisplayJar }
 				};
 		}
 
@@ -2501,6 +2503,52 @@ namespace TShockAPI
 			return args.Handled;
 		}
 
+		public class DisplayJarTryPlacingEventArgs : GetDataHandledEventArgs
+		{
+			/// <summary>
+			/// The X tile position of the placement action.
+			/// </summary>
+			public ushort TileX { get; set; }
+			/// <summary>
+			/// The Y tile position of the placement action.
+			/// </summary>
+			public ushort TileY { get; set; }
+			/// <summary>
+			/// The Item ID that is being placed in the display jar.
+			/// </summary>
+			public short ItemID { get; set; }
+			/// <summary>
+			/// The prefix of the item that is being placed in the display jar.
+			/// </summary>
+			public byte Prefix { get; set; }
+			/// <summary>
+			/// The stack of the item that is being placed in the display jar.
+			/// </summary>
+			public short Stack { get; set; }
+		}
+		/// <summary>
+		/// Called when a player is placing an item in a display jar.
+		/// </summary>
+		public static HandlerList<DisplayJarTryPlacingEventArgs> DisplayJarTryPlacing = new HandlerList<DisplayJarTryPlacingEventArgs>();
+		private static bool OnDisplayJarTryPlacing(TSPlayer player, MemoryStream data, ushort tileX, ushort tileY, short itemID, byte prefix, short stack)
+		{
+			if (DisplayJarTryPlacing == null)
+				return false;
+
+			var args = new DisplayJarTryPlacingEventArgs
+			{
+				Player = player,
+				Data = data,
+				TileX = tileX,
+				TileY = tileY,
+				ItemID = itemID,
+				Prefix = prefix,
+				Stack = stack,
+			};
+			DisplayJarTryPlacing.Invoke(null, args);
+			return args.Handled;
+		}
+
 		/// <summary>
 		/// Used when a net module is loaded
 		/// </summary>
@@ -2909,8 +2957,30 @@ namespace TShockAPI
 			byte team = args.Data.ReadInt8();
 			PlayerSpawnContext context = (PlayerSpawnContext)args.Data.ReadByte();
 
+			bool teamCorrectNeeded = false; // If we need to correct their team after handling
+			string pvpMode = TShock.Config.Settings.PvPMode.ToLowerInvariant();
+
+			// To prevent clients from bypassing this pvp mode, we must correct their team
+			if (pvpMode == PvPModes.PvPWithNoTeam && team != PlayerTeamID.None)
+			{
+				team = (byte)PlayerTeamID.None;
+				args.TPlayer.team = PlayerTeamID.None; // Make sure to set it to 0 (no team). This ensures it gets corrected.
+				teamCorrectNeeded = true;
+			}
+
+			// Malicious client likely trying to fast switch their team
+			if (team != args.Player.Team && args.Player.FinishedHandshake && (DateTime.UtcNow - args.Player.LastPvPTeamChange).TotalSeconds < 5)
+				teamCorrectNeeded = true;
+
 			if (args.Player.State >= (int)ConnectionState.RequestingWorldData && !args.Player.FinishedHandshake)
+			{
 				args.Player.FinishedHandshake = true; //If the player has requested world data before sending spawn player, they should be at the obvious ClientRequestedWorldData state. Also only set this once to remove redundant updates.
+				if (!Main.ServerSideCharacter && team != 0 && !teamCorrectNeeded) // Player will be requesting a team change later
+				{
+					args.Player.InitialTeamChangePending = true;
+					args.Player.LastPvPTeamChange = DateTime.UtcNow; // To prevent malicious clients from being able to get a free team change, we reset InitialTeamChangePending after 5 seconds
+				}
+			}
 
 			if (OnPlayerSpawn(args.Player, args.Data, player, spawnX, spawnY, respawnTimer, numberOfDeathsPVE, numberOfDeathsPVP, team, context))
 				return true;
@@ -2961,7 +3031,16 @@ namespace TShockAPI
 					return false;
 				}
 
-				args.TPlayer.team = team;
+				if (team != args.TPlayer.team)
+				{
+					if (teamCorrectNeeded)
+						team = (byte)args.TPlayer.team;
+					else
+						args.Player.LastPvPTeamChange = DateTime.UtcNow;
+
+					args.TPlayer.team = team;
+				}
+
 				args.TPlayer.Spawn(context);
 				// spawn the player before teleporting
 				NetMessage.SendData((int)PacketTypes.PlayerSpawn, -1, args.Player.Index, null, args.Player.Index, (int)PlayerSpawnContext.ReviveFromDeath);
@@ -2974,9 +3053,59 @@ namespace TShockAPI
 				args.TPlayer.respawnTimer = respawnTimer;
 				args.TPlayer.numberOfDeathsPVE = numberOfDeathsPVE;
 				args.TPlayer.numberOfDeathsPVP = numberOfDeathsPVP;
+
+				// Correct their team after
+				if (teamCorrectNeeded)
+					args.Player.SendData(PacketTypes.PlayerTeam, "", args.Player.Index);
+
 				return true;
 			}
-			return false;
+
+			// Note: Because clients can change their team through this packet now, we have to always handle it ourselves to make sure we're syncing their team correctly.
+			if (teamCorrectNeeded) // Correction of malicious client's team change necessary, or we're enforcing the 'pvpwithnoteam' mode, where their team must be set to 0.
+				team = (byte)args.TPlayer.team; // This will always be 0 in 'pvpwithnoteam'
+
+			if (!args.Player.InitialTeamChangePending && args.TPlayer.team != team) // Client has changed team through this packet, track time since last team change
+				args.Player.LastPvPTeamChange = DateTime.UtcNow;
+
+			args.Player.TPlayer.team = team;
+			args.TPlayer.respawnTimer = respawnTimer;
+			args.TPlayer.numberOfDeathsPVE = numberOfDeathsPVE;
+			args.TPlayer.numberOfDeathsPVP = numberOfDeathsPVP;
+
+			if (args.TPlayer.respawnTimer > 0)
+				args.Player.TPlayer.dead = true;
+
+			args.Player.TPlayer.Spawn(context);
+
+			// Handling of data from MessageBuffer, since we override this entirely now
+			if (args.Player.State == (int)ConnectionState.RequestingWorldData) // State 3
+			{
+				args.Player.State = (int)ConnectionState.Complete;
+				NetMessage.buffer[args.Player.Index].broadcast = true;
+				NetMessage.SyncConnectedPlayer(args.Player.Index);
+				var isHost = NetMessage.DoesPlayerSlotCountAsAHost(args.Player.Index);
+				Main.countsAsHostForGameplay[args.Player.Index] = isHost;
+				if (isHost)
+					NetMessage.TrySendData((int)PacketTypes.SetCountsAsHostForGameplay, args.Player.Index, -1, null, args.Player.Index, true.ToInt());
+
+				NetMessage.TrySendData((int)PacketTypes.FinishedConnectingToServer, args.Player.Index);
+				NetMessage.greetPlayer(args.Player.Index);
+				if (args.Player.TPlayer.unlockedBiomeTorches)
+				{
+					var npc = new NPC();
+					npc.SetDefaults(NPCID.TorchGod);
+					Main.BestiaryTracker.Kills.RegisterKill(npc);
+				}
+			}
+
+			NetMessage.SendData((int)PacketTypes.PlayerSpawn, -1, args.Player.Index, null, args.Player.Index, (int)context);
+
+			if (teamCorrectNeeded)
+				args.Player.SendData(PacketTypes.PlayerTeam, "", args.Player.Index);
+
+			// We've handled it ourselves
+			return true;
 		}
 
 		private static bool HandlePlayerUpdate(GetDataHandlerArgs args)
@@ -3357,7 +3486,7 @@ namespace TShockAPI
 			}
 
 			string pvpMode = TShock.Config.Settings.PvPMode.ToLowerInvariant();
-			if (pvpMode == "disabled" || pvpMode == "always" || pvpMode == "pvpwithnoteam" || (DateTime.UtcNow - args.Player.LastPvPTeamChange).TotalSeconds < 5)
+			if (pvpMode == PvPModes.Disabled || pvpMode == PvPModes.Always || pvpMode == PvPModes.PvPWithNoTeam || (DateTime.UtcNow - args.Player.LastPvPTeamChange).TotalSeconds < 5)
 			{
 				TShock.Log.ConsoleDebug(GetString("GetDataHandlers / HandleTogglePvp rejected fastswitch {0}", args.Player.Name));
 				args.Player.SendData(PacketTypes.TogglePvp, "", id);
@@ -3623,7 +3752,7 @@ namespace TShockAPI
 			if (id != args.Player.Index)
 				return true;
 
-			if (team == args.Player.Team) // No need to handle, interferes with SSC if we do.
+			if (!args.Player.InitialTeamChangePending && team == args.Player.Team) // No need to handle if initial change isn't pending, interferes with SSC if we do.
 				return true;
 
 			if (args.Player.IgnoreSSCPackets)
@@ -3634,7 +3763,23 @@ namespace TShockAPI
 			}
 
 			string pvpMode = TShock.Config.Settings.PvPMode.ToLowerInvariant();
-			if (pvpMode == "pvpwithnoteam" || (DateTime.UtcNow - args.Player.LastPvPTeamChange).TotalSeconds < 5)
+			if (pvpMode == PvPModes.PvPWithNoTeam)
+			{
+				args.Player.SendData(PacketTypes.PlayerTeam, "", id);
+				TShock.Log.ConsoleDebug(GetString("GetDataHandlers / HandlePlayerTeam rejected from (pvp mode disallows teams) {0}", args.Player.Name));
+				return true;
+			}
+
+			// Player has pending team change
+			if (args.Player.InitialTeamChangePending)
+			{
+				args.Player.InitialTeamChangePending = false;
+				args.Player.LastPvPTeamChange = DateTime.MinValue; // Players can change teams or toggle pvp immediately after joining, so we have to allow such
+				TShock.Log.ConsoleDebug(GetString("GetDataHandlers / HandlePlayerTeam super accepted from (initial team change) {0}", args.Player.Name));
+				return false;
+			}
+
+			if ((DateTime.UtcNow - args.Player.LastPvPTeamChange).TotalSeconds < 5)
 			{
 				args.Player.SendData(PacketTypes.PlayerTeam, "", id);
 				TShock.Log.ConsoleDebug(GetString("GetDataHandlers / HandlePlayerTeam rejected team fastswitch {0}", args.Player.Name));
@@ -3746,6 +3891,7 @@ namespace TShockAPI
 				if (!args.Player.HasPermission(Permissions.summonboss))
 				{
 					args.Player.SendErrorMessage(GetString("You do not have permission to summon the Skeletron."));
+					args.Player.SendData(PacketTypes.NpcUpdate, "", id);
 					TShock.Log.ConsoleDebug(GetString($"GetDataHandlers / HandleNpcStrike rejected Skeletron summon from {args.Player.Name}"));
 					return true;
 				}
@@ -3806,6 +3952,11 @@ namespace TShockAPI
 						args.Player.SendErrorMessage(GetString("You must set ForceTime to normal via config to use the Enchanted Moondial."));
 					return true;
 				}
+			}
+			else if (type == 10)
+			{
+				// Player get free cake from Party Girl.It is not handled in 1.4.5.5
+				return false;
 			}
 			else if (!args.Player.HasPermission($"tshock.specialeffects.{type}"))
 			{
@@ -4220,7 +4371,7 @@ namespace TShockAPI
 
 					if (!args.Player.HasPermission(Permissions.tppotion))
 					{
-						Fail("Teleportation Potions");
+						Fail(GetString("Teleportation Potions"));
 						return true;
 					}
 					break;
@@ -4238,11 +4389,11 @@ namespace TShockAPI
 					{
 						if (args.Player.ItemInHand.type == ItemID.ShellphoneOcean || args.Player.SelectedItem.type == ItemID.ShellphoneOcean)
 						{
-							Fail("the Shellphone (Ocean)");
+							Fail(GetString("the Shellphone (Ocean)"));
 						}
 						else
 						{
-							Fail("the Magic Conch");
+							Fail(GetString("the Magic Conch"));
 						}
 						return true;
 					}
@@ -4261,11 +4412,11 @@ namespace TShockAPI
 					{
 						if (args.Player.ItemInHand.type == ItemID.ShellphoneHell || args.Player.SelectedItem.type == ItemID.ShellphoneHell)
 						{
-							Fail("the Shellphone (Underworld)");
+							Fail(GetString("the Shellphone (Underworld)"));
 						}
 						else
 						{
-							Fail("the Demon Conch");
+							Fail(GetString("the Demon Conch"));
 						}
 						return true;
 					}
@@ -4870,6 +5021,19 @@ namespace TShockAPI
 			return false;
 		}
 
+		private static bool HandleDisplayJar(GetDataHandlerArgs args)
+		{
+			ushort tileX = args.Data.ReadUInt16();
+			ushort tileY = args.Data.ReadUInt16();
+			short itemID = args.Data.ReadInt16();
+			byte prefix = args.Data.ReadInt8();
+			short stack = args.Data.ReadInt16();
+
+			if (OnDisplayJarTryPlacing(args.Player, args.Data, tileX, tileY, itemID, prefix, stack))
+				return true;
+
+			return false;
+		}
 		public enum DoorAction
 		{
 			OpenDoor = 0,
