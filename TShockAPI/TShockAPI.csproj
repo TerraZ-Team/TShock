@@ -28,7 +28,7 @@
     <PackageLicenseExpression>GPL-3.0-or-later</PackageLicenseExpression>
     <Authors>TShock Contributors</Authors>
     <Description>TShock is a toolbox for Terraria servers and communities.</Description>
-    <PackageId>TShock</PackageId> <!-- package name for nuget, instead of TShockAPI -->
+    <PackageId>TZ.TShockAPI</PackageId> <!-- keep assembly/file names unchanged -->
   </PropertyGroup>
 
   <ItemGroup>

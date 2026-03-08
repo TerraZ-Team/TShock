@@ -1,30 +1,39 @@
-name: Deploy NuGet(OTAPI3)
+name: Publish NuGet
 
 on:
   push:
     branches: [ nuget-release ]
+  workflow_dispatch:
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
     environment: release
 
     steps:
-    - uses: actions/checkout@v4
-      with:
-        submodules: 'recursive'
-    - name: Setup .NET
-      uses: actions/setup-dotnet@v4
-      with:
-        dotnet-version: 9.0.x
-    - name: Restore dependencies
-      run: dotnet restore
-    - name: Build
-      run: dotnet build TShock.sln --configuration Release --no-restore
-    - name: Test
-      run: dotnet test --no-build --verbosity normal --configuration Release
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
-    # Publish to nuget
-    - name: Push TShockAPI
-      run: dotnet nuget push TShockAPI/bin/Release/*.nupkg -k ${{ secrets.NUGET_API_KEY }} -s https://api.nuget.org/v3/index.json
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Add MonoMod source
+        run: dotnet nuget add source https://pkgs.dev.azure.com/MonoMod/MonoMod/_packaging/DevBuilds%40Local/nuget/v3/index.json -n DevBuilds@Local
+
+      - name: Restore dependencies
+        run: dotnet restore TShock.sln
+
+      - name: Build
+        run: dotnet build TShock.sln --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test TShock.sln --no-build --verbosity normal --configuration Release
+
+      - name: Pack TZ.TShockAPI
+        run: dotnet pack TShockAPI/TShockAPI.csproj --configuration Release --no-build
+
+      - name: Push TZ.TShockAPI
+        run: dotnet nuget push "TShockAPI/bin/Release/TZ.TShockAPI.*.nupkg" --api-key "${{ secrets.NUGET_API_KEY }}" --source https://api.nuget.org/v3/index.json --skip-duplicate

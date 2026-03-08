@@ -61,8 +61,8 @@ namespace TShockAPI
 	[ApiVersion(2, 1)]
 	public class TShock : TerrariaPlugin
 	{
-		/// <summary>VersionNum - The version number the TerrariaAPI will return back to the API. We just use the Assembly info.</summary>
-		public static readonly Version VersionNum = Assembly.GetExecutingAssembly().GetName().Version;
+		/// <summary>VersionNum - The version number the TerrariaAPI will return back to the API.</summary>
+		public static readonly Version VersionNum = GetVersionNum();
 		/// <summary>VersionCodename - The version codename is displayed when the server starts. Inspired by software codenames conventions.</summary>
 		public static readonly string VersionCodename = "Profoundly Collaborative";
 
@@ -161,6 +161,15 @@ namespace TShockAPI
 		public static event Action Initialized;
 
 		public static ModuleManager ModuleManager { get; } = new ModuleManager();
+
+		private static Version GetVersionNum()
+		{
+			var assemblyVersion = Assembly.GetExecutingAssembly().GetName().Version ?? new Version(0, 0);
+			if (assemblyVersion.Revision == 0 && assemblyVersion.Build >= 0)
+				return new Version(assemblyVersion.Major, assemblyVersion.Minor, assemblyVersion.Build);
+
+			return assemblyVersion;
+		}
 
 		/// <summary>Version - The version required by the TerrariaAPI to be passed back for checking &amp; loading the plugin.</summary>
 		/// <value>value - The version number specified in the Assembly, based on the VersionNum variable set in this class.</value>
