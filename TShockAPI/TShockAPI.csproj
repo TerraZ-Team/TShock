@@ -6,11 +6,11 @@
     <TargetFramework>net9.0</TargetFramework>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <GenerateDocumentationFile>True</GenerateDocumentationFile>
-    <!-- 
+    <!--
       Version information for an assembly consists of the following four values:
 
           Major Version
-          Minor Version 
+          Minor Version
           Build Number
           Starting in version 4.2.5, we are no longer including the fourth decimal
           location, which previously held the date and time.
@@ -19,6 +19,9 @@
       so that the update manager works correctly (via the Github releases api and mimic)
     -->
     <Version>6.1.0</Version>
+    <!-- PackageVersion may advance for packaging-only fixes without changing the
+         TShock assembly/API version expected by a 6.1.0 server. -->
+    <PackageVersion>6.1.1</PackageVersion>
     <AssemblyTitle>TShock for Terraria</AssemblyTitle>
     <Company>TShock Contributors</Company>
     <Product>TShockAPI</Product>
