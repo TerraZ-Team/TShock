@@ -84,7 +84,6 @@ namespace TShockAPI
 					{ PacketTypes.DoorUse, HandleDoorUse },
 					{ PacketTypes.TileSendSquare, HandleSendTileRect },
 					{ PacketTypes.ItemDrop, HandleItemDrop },
-					{ PacketTypes.ItemOwner, HandleItemOwner },
 					{ PacketTypes.NpcItemStrike, HandleNpcItemStrike },
 					{ PacketTypes.ProjectileNew, HandleProjectileNew },
 					{ PacketTypes.NpcStrike, HandleNpcStrike },
@@ -137,14 +136,11 @@ namespace TShockAPI
 					{ PacketTypes.TileEntityDisplayDollItemSync, HandleTileEntityDisplayDollItemSync },
 					{ PacketTypes.RequestTileEntityInteraction, HandleRequestTileEntityInteraction },
 					{ PacketTypes.SyncTilePicking, HandleSyncTilePicking },
-					{ PacketTypes.SyncRevengeMarker, HandleSyncRevengeMarker },
 					{ PacketTypes.LandGolfBallInCup, HandleLandGolfBallInCup },
 					{ PacketTypes.FishOutNPC, HandleFishOutNPC },
 					{ PacketTypes.FoodPlatterTryPlacing, HandleFoodPlatterTryPlacing },
-					{ PacketTypes.SyncItemsWithShimmer, HandleItemDrop },
 					{ PacketTypes.SyncCavernMonsterType, HandleSyncCavernMonsterType },
 					{ PacketTypes.SyncLoadout, HandleSyncLoadout },
-					{ PacketTypes.SyncItemCannotBeTakenByEnemies, HandleItemDrop },
 					{ PacketTypes.SpectatePlayer, HandleSyncPlayerSpectating },
 					{ PacketTypes.TeamChangeFromUI, HandlePlayerTeam }, // Same packet as PlayerTeam
 					{ PacketTypes.TEDeadCellsDisplayJar, HandleDisplayJar }
@@ -2587,7 +2583,8 @@ namespace TShockAPI
 
 		private static bool HandlePlayerInfo(GetDataHandlerArgs args)
 		{
-			byte playerid = args.Data.ReadInt8();
+			args.Data.ReadInt8(); // Vanilla replaces the client-supplied player id with whoAmI on the server.
+			byte playerid = (byte)args.Player.Index;
 			// 0-3 male; 4-7 female
 			int skinVariant = args.Data.ReadByte();
 			byte voiceVariant = args.Data.ReadInt8();
@@ -2720,7 +2717,8 @@ namespace TShockAPI
 
 		private static bool HandlePlayerSlot(GetDataHandlerArgs args)
 		{
-			byte plr = args.Data.ReadInt8();
+			args.Data.ReadInt8(); // Vanilla replaces the client-supplied player id with whoAmI on the server.
+			byte plr = (byte)args.Player.Index;
 			short slot = args.Data.ReadInt16();
 			short stack = args.Data.ReadInt16();
 			byte prefix = args.Data.ReadInt8();
@@ -2948,7 +2946,8 @@ namespace TShockAPI
 				return true;
 			}
 
-			byte player = args.Data.ReadInt8();
+			args.Data.ReadInt8(); // Vanilla replaces the client-supplied player id with whoAmI on the server.
+			byte player = (byte)args.Player.Index;
 			short spawnX = args.Data.ReadInt16();
 			short spawnY = args.Data.ReadInt16();
 			int respawnTimer = args.Data.ReadInt32();
@@ -3116,7 +3115,8 @@ namespace TShockAPI
 				return true;
 			}
 
-			byte playerID = args.Data.ReadInt8();
+			args.Data.ReadInt8(); // Vanilla replaces the client-supplied player id with whoAmI on the server.
+			byte playerID = (byte)args.Player.Index;
 			ControlSet controls = new ControlSet((BitsByte)args.Data.ReadByte());
 			MiscDataSet1 miscData1 = new MiscDataSet1((BitsByte)args.Data.ReadByte());
 			MiscDataSet2 miscData2 = new MiscDataSet2((BitsByte)args.Data.ReadByte());
@@ -3149,7 +3149,8 @@ namespace TShockAPI
 
 		private static bool HandlePlayerHp(GetDataHandlerArgs args)
 		{
-			var plr = args.Data.ReadInt8();
+			args.Data.ReadInt8(); // Vanilla replaces the client-supplied player id with whoAmI on the server.
+			var plr = (byte)args.Player.Index;
 			var cur = args.Data.ReadInt16();
 			var max = args.Data.ReadInt16();
 
@@ -3206,13 +3207,13 @@ namespace TShockAPI
 			if (OnDoorUse(args.Player, args.Data, x, y, direction, doorAction))
 				return true;
 
-			ushort tileType = Main.tile[x, y].type;
-
 			if (x >= Main.maxTilesX || y >= Main.maxTilesY || x < 0 || y < 0) // Check for out of range
 			{
 				TShock.Log.ConsoleDebug(GetString("GetDataHandlers / HandleDoorUse rejected out of range door {0}", args.Player.Name));
 				return true;
 			}
+
+			ushort tileType = Main.tile[x, y].type;
 
 			if (action < 0 || action > 5)
 			{
@@ -3278,23 +3279,6 @@ namespace TShockAPI
 
 			if (OnItemDrop(args.Player, args.Data, id, pos, vel, stacks, prefix, noDelay, type))
 				return true;
-
-			return false;
-		}
-
-		private static bool HandleItemOwner(GetDataHandlerArgs args)
-		{
-			var id = args.Data.ReadInt16();
-			var owner = args.Data.ReadInt8();
-
-			if (id < 0 || id > 400)
-				return true;
-
-			if (id == 400 && owner == 255)
-			{
-				args.Player.IgnoreSSCPackets = false;
-				return true;
-			}
 
 			return false;
 		}
@@ -3527,7 +3511,8 @@ namespace TShockAPI
 
 		private static bool HandleTogglePvp(GetDataHandlerArgs args)
 		{
-			byte id = args.Data.ReadInt8();
+			args.Data.ReadInt8(); // Vanilla replaces the client-supplied player id with whoAmI on the server.
+			byte id = (byte)args.Player.Index;
 			bool pvp = args.Data.ReadBoolean();
 			if (OnPvpToggled(args.Player, args.Data, id, pvp))
 				return true;
@@ -3630,7 +3615,8 @@ namespace TShockAPI
 				return true;
 			}
 
-			var plr = args.Data.ReadInt8();
+			args.Data.ReadInt8(); // Vanilla replaces the client-supplied player id with whoAmI on the server.
+			var plr = (byte)args.Player.Index;
 			BitsByte zone1 = args.Data.ReadInt8();
 			BitsByte zone2 = args.Data.ReadInt8();
 			BitsByte zone3 = args.Data.ReadInt8();
@@ -3733,7 +3719,8 @@ namespace TShockAPI
 
 		private static bool HandleNpcTalk(GetDataHandlerArgs args)
 		{
-			var plr = args.Data.ReadInt8();
+			args.Data.ReadInt8(); // Vanilla replaces the client-supplied player id with whoAmI on the server.
+			var plr = (byte)args.Player.Index;
 			var npc = args.Data.ReadInt16();
 
 			if (OnNpcTalk(args.Player, args.Data, plr, npc))
@@ -3772,7 +3759,8 @@ namespace TShockAPI
 
 		private static bool HandlePlayerMana(GetDataHandlerArgs args)
 		{
-			var plr = args.Data.ReadInt8();
+			args.Data.ReadInt8(); // Vanilla replaces the client-supplied player id with whoAmI on the server.
+			var plr = (byte)args.Player.Index;
 			var cur = args.Data.ReadInt16();
 			var max = args.Data.ReadInt16();
 
@@ -3797,8 +3785,15 @@ namespace TShockAPI
 
 		private static bool HandlePlayerTeam(GetDataHandlerArgs args)
 		{
-			byte id = args.Data.ReadInt8();
+			args.Data.ReadInt8(); // Vanilla replaces the client-supplied player id with whoAmI on the server.
+			byte id = (byte)args.Player.Index;
 			byte team = args.Data.ReadInt8();
+			if (team >= Main.teamColor.Length)
+			{
+				TShock.Log.ConsoleDebug(GetString("GetDataHandlers / HandlePlayerTeam rejected invalid team {0} from {1}", team, args.Player.Name));
+				return true;
+			}
+
 			if (OnPlayerTeam(args.Player, args.Data, id, team))
 				return true;
 
@@ -3901,7 +3896,8 @@ namespace TShockAPI
 
 		private static bool HandlePlayerBuffList(GetDataHandlerArgs args)
 		{
-			var id = args.Data.ReadInt8();
+			args.Data.ReadInt8(); // Vanilla replaces the client-supplied player id with whoAmI on the server.
+			var id = (byte)args.Player.Index;
 
 			if (OnPlayerBuffUpdate(args.Player, args.Data, id))
 				return true;
@@ -3933,7 +3929,8 @@ namespace TShockAPI
 
 		private static bool HandleSpecial(GetDataHandlerArgs args)
 		{
-			var id = args.Data.ReadInt8();
+			args.Data.ReadInt8(); // Vanilla replaces the client-supplied player id with whoAmI on the server.
+			var id = (byte)args.Player.Index;
 			var type = args.Data.ReadInt8();
 
 			if (OnNPCSpecial(args.Player, args.Data, id, type))
@@ -4051,6 +4048,12 @@ namespace TShockAPI
 			var x = args.Data.ReadInt16();
 			var y = args.Data.ReadInt16();
 			var householdStatus = args.Data.ReadInt8();
+
+			if (id < 0 || id >= Main.maxNPCs)
+			{
+				TShock.Log.ConsoleDebug(GetString("GetDataHandlers / HandleUpdateNPCHome rejected invalid NPC index {0} from {1}", id, args.Player.Name));
+				return true;
+			}
 
 			if (OnUpdateNPCHome(args.Player, args.Data, id, x, y, householdStatus))
 				return true;
@@ -4731,7 +4734,8 @@ namespace TShockAPI
 
 		private static bool HandlePlayerKillMeV2(GetDataHandlerArgs args)
 		{
-			var id = args.Data.ReadInt8();
+			args.Data.ReadInt8(); // Vanilla replaces the client-supplied player id with whoAmI on the server.
+			var id = (byte)args.Player.Index;
 			PlayerDeathReason playerDeathReason = PlayerDeathReason.FromReader(new BinaryReader(args.Data));
 			var dmg = args.Data.ReadInt16();
 			var direction = (byte)(args.Data.ReadInt8() - 1);
@@ -4802,7 +4806,8 @@ namespace TShockAPI
 
 		private static bool HandleEmoji(GetDataHandlerArgs args)
 		{
-			byte playerIndex = args.Data.ReadInt8();
+			args.Data.ReadInt8(); // Vanilla replaces the client-supplied player id with whoAmI on the server.
+			byte playerIndex = (byte)args.Player.Index;
 			byte emojiID = args.Data.ReadInt8();
 
 			if (OnEmoji(args.Player, args.Data, playerIndex, emojiID))
@@ -4813,7 +4818,8 @@ namespace TShockAPI
 
 		private static bool HandleTileEntityDisplayDollItemSync(GetDataHandlerArgs args)
 		{
-			byte playerIndex = args.Data.ReadInt8();
+			args.Data.ReadInt8(); // Vanilla replaces the client-supplied player id with whoAmI on the server.
+			byte playerIndex = (byte)args.Player.Index;
 			int tileEntityID = args.Data.ReadInt32();
 			int slot = args.Data.ReadByte();
 			int subtype = args.Data.ReadByte();
@@ -4842,11 +4848,17 @@ namespace TShockAPI
 
 			bool HandleItemSync(DisplayDollInventoryID inventoryID, Item[] items)
 			{
-				Item oldItem = items[slot];
-
 				ushort itemType = args.Data.ReadUInt16();
 				ushort stack = args.Data.ReadUInt16();
 				int prefix = args.Data.ReadByte();
+
+				if ((uint)slot >= (uint)items.Length)
+				{
+					TShock.Log.ConsoleDebug(GetString("GetDataHandlers / HandleTileEntityDisplayDollItemSync rejected invalid slot {0} from {1}", slot, args.Player.Name));
+					return true;
+				}
+
+				Item oldItem = items[slot];
 
 				if (oldItem.type == 0 && itemType == 0)
 					return false;
@@ -4866,7 +4878,8 @@ namespace TShockAPI
 		private static bool HandleRequestTileEntityInteraction(GetDataHandlerArgs args)
 		{
 			int tileEntityID = args.Data.ReadInt32();
-			byte playerIndex = args.Data.ReadInt8();
+			args.Data.ReadInt8(); // Vanilla replaces the client-supplied player id with whoAmI on the server.
+			byte playerIndex = (byte)args.Player.Index;
 
 			if (!TileEntity.ByID.TryGetValue(tileEntityID, out TileEntity tileEntity))
 				return false;
@@ -4879,28 +4892,14 @@ namespace TShockAPI
 
 		private static bool HandleSyncTilePicking(GetDataHandlerArgs args)
 		{
-			byte playerIndex = args.Data.ReadInt8();
+			args.Data.ReadInt8(); // Vanilla replaces the client-supplied player id with whoAmI on the server.
+			byte playerIndex = (byte)args.Player.Index;
 			short tileX = args.Data.ReadInt16();
 			short tileY = args.Data.ReadInt16();
 			byte damage = args.Data.ReadInt8();
 
 			if (OnSyncTilePicking(args.Player, args.Data, playerIndex, tileX, tileY, damage))
 				return true;
-
-			return false;
-		}
-
-		private static bool HandleSyncRevengeMarker(GetDataHandlerArgs args)
-		{
-			int uniqueID = args.Data.ReadInt32();
-			Vector2 location = args.Data.ReadVector2();
-			int netId = args.Data.ReadInt32();
-			float npcHpPercent = args.Data.ReadSingle();
-			int npcTypeAgainstDiscouragement = args.Data.ReadInt32(); //tfw the argument is Type Against Discouragement
-			int npcAiStyleAgainstDiscouragement = args.Data.ReadInt32(); //see ^
-			int coinsValue = args.Data.ReadInt32();
-			float baseValue = args.Data.ReadSingle();
-			bool spawnedFromStatus = args.Data.ReadBoolean();
 
 			return false;
 		}
@@ -4954,7 +4953,8 @@ namespace TShockAPI
 
 		private static bool HandleSyncLoadout(GetDataHandlerArgs args)
 		{
-			var playerIndex = args.Data.ReadInt8();
+			args.Data.ReadInt8(); // Vanilla replaces the client-supplied player id with whoAmI on the server.
+			var playerIndex = (byte)args.Player.Index;
 			var loadoutIndex = args.Data.ReadInt8();
 
 			// When syncing a player's own loadout index, they then sync it back to us...
