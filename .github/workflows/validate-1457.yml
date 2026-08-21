@@ -1,14 +1,15 @@
 name: Validate Terraria 1.4.5.7 port
 
 on:
+  pull_request:
+    branches: [ general-devel ]
   push:
-    branches:
-      - update/terraria-1.4.5.7
+    branches: [ update/terraria-1.4.5.7 ]
     paths:
       - .github/workflows/validate-1457.yml
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   validate:
@@ -16,9 +17,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: update/terraria-1.4.5.7
           submodules: recursive
-          fetch-depth: 0
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
@@ -47,12 +46,3 @@ jobs:
           if (-not $package) {
             throw "TZ.TShockAPI 6.1.1 package was not produced."
           }
-
-      - name: Remove one-shot validation workflow
-        shell: pwsh
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git rm -- .github/workflows/validate-1457.yml
-          git commit -m "Complete Terraria 1.4.5.7 validation"
-          git push origin HEAD:update/terraria-1.4.5.7
