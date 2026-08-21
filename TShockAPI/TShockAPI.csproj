@@ -18,9 +18,7 @@
       Also, be sure to release on github with the exact assembly version tag as below
       so that the update manager works correctly (via the Github releases api and mimic)
     -->
-    <Version>6.1.0</Version>
-    <!-- PackageVersion may advance for packaging-only fixes without changing the
-         TShock assembly/API version expected by a 6.1.0 server. -->
+    <Version>6.1.1</Version>
     <PackageVersion>6.1.1</PackageVersion>
     <AssemblyTitle>TShock for Terraria</AssemblyTitle>
     <Company>TShock Contributors</Company>

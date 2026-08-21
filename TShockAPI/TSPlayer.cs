@@ -1425,7 +1425,7 @@ namespace TShockAPI
 				{
 					for (int i = 0; i < 50; i++) //51 is trash can, 52-55 is coins, 56-59 is ammo
 					{
-						if (TPlayer.inventory[i] == null || !TPlayer.inventory[i].active || TPlayer.inventory[i].Name == "")
+						if (TPlayer.inventory[i] == null || TPlayer.inventory[i].IsAir || TPlayer.inventory[i].Name == "")
 						{
 							flag = true;
 							break;
@@ -1749,10 +1749,19 @@ namespace TShockAPI
 		{
 			using (var ms = new MemoryStream())
 			{
+				var generation = 0;
+				if (index >= 0 && index < Main.maxProjectiles)
+				{
+					var projectile = Main.projectile[index];
+					if (projectile != null && projectile.owner == owner)
+						generation = projectile.key.Generation;
+				}
+
 				var msg = new ProjectileRemoveMsg
 				{
 					Index = (short)index,
-					Owner = (byte)owner
+					Owner = (byte)owner,
+					Generation = generation
 				};
 				msg.PackFull(ms);
 				SendRawData(ms.ToArray());
@@ -1991,7 +2000,7 @@ namespace TShockAPI
 
 		private void GiveItemByDrop(int type, int stack, int prefix)
 		{
-			int itemIndex = Item.NewItem(new EntitySource_DebugCommand(), (int)X, (int)Y, TPlayer.width, TPlayer.height, type, stack, true, prefix, true);
+			int itemIndex = Item.NewItem(new EntitySource_DebugCommand(), (int)X, (int)Y, TPlayer.width, TPlayer.height, type, stack, true, prefix, Terraria.NewItemOwnership.None);
 			Main.item[itemIndex].playerIndexTheItemIsReservedFor = this.Index;
 			SendData(PacketTypes.ItemDrop, "", itemIndex, 1);
 			SendData(PacketTypes.ItemOwner, null, itemIndex);

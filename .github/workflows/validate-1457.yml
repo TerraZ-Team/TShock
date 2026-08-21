@@ -1,0 +1,48 @@
+name: Validate Terraria 1.4.5.7 port
+
+on:
+  pull_request:
+    branches: [ general-devel ]
+  push:
+    branches: [ update/terraria-1.4.5.7 ]
+    paths:
+      - .github/workflows/validate-1457.yml
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Add MonoMod source
+        run: dotnet nuget add source https://pkgs.dev.azure.com/MonoMod/MonoMod/_packaging/DevBuilds%40Local/nuget/v3/index.json -n DevBuilds@Local
+
+      - name: Restore dependencies
+        run: dotnet restore TShock.sln
+
+      - name: Build
+        run: dotnet build TShock.sln --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test TShock.sln --no-build --verbosity normal --configuration Release
+
+      - name: Pack TZ.TShockAPI
+        run: dotnet pack TShockAPI/TShockAPI.csproj --configuration Release --no-build --output artifacts/nuget
+
+      - name: Verify package version
+        shell: pwsh
+        run: |
+          $package = Get-ChildItem artifacts/nuget/TZ.TShockAPI.6.1.1.nupkg | Select-Object -First 1
+          if (-not $package) {
+            throw "TZ.TShockAPI 6.1.1 package was not produced."
+          }

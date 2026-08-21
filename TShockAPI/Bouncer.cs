@@ -1,4 +1,4 @@
-/*
+﻿/*
 TShock, a server mod for Terraria
 Copyright (C) 2011-2019 Pryaxis & TShock Contributors
 
@@ -2803,7 +2803,7 @@ namespace TShockAPI
 
 			if (!args.Player.HasBuildPermission(args.X, args.Y))
 			{
-				int num = Item.NewItem(null, (args.X * 16) + 8, (args.Y * 16) + 8, args.Player.TPlayer.width, args.Player.TPlayer.height, args.ItemID, args.Stack, noBroadcast: true, args.Prefix, noGrabDelay: true);
+				int num = Item.NewItem(null, (args.X * 16) + 8, (args.Y * 16) + 8, args.Player.TPlayer.width, args.Player.TPlayer.height, args.ItemID, args.Stack, noBroadcast: true, args.Prefix, Terraria.NewItemOwnership.None);
 				Main.item[num].playerIndexTheItemIsReservedFor = args.Player.Index;
 				NetMessage.SendData((int)PacketTypes.ItemDrop, args.Player.Index, -1, NetworkText.Empty, num, 1f);
 				NetMessage.SendData((int)PacketTypes.ItemOwner, args.Player.Index, -1, NetworkText.Empty, num);
@@ -2825,27 +2825,45 @@ namespace TShockAPI
 
 		internal void OnPlayerPortalTeleport(object sender, GetDataHandlers.TeleportThroughPortalEventArgs args)
 		{
-			//Packet 96 (player teleport through portal) has no validation on whether or not the player id provided
-			//belongs to the player who sent the packet.
 			if (args.Player.Index != args.TargetPlayerIndex)
 			{
 				TShock.Log.ConsoleDebug(GetString("Bouncer / OnPlayerPortalTeleport rejected untargetable teleport from {0}", args.Player.Name));
-				//If the player who sent the packet is not the player being teleported, cancel this packet
-				args.Player.Disable(GetString("Malicious portal attempt."), DisableFlags.WriteToLogAndConsole); //Todo: this message is not particularly clear - suggestions wanted
+				args.Player.Disable(GetString("Malicious portal attempt."), DisableFlags.WriteToLogAndConsole);
 				args.Handled = true;
 				return;
 			}
 
-			//Generic bounds checking, though I'm not sure if anyone would willingly hack themselves outside the map?
-			if (args.NewPosition.X > Main.maxTilesX *16 || args.NewPosition.X < 0
-				|| args.NewPosition.Y > Main.maxTilesY *16 || args.NewPosition.Y < 0)
+			if (args.NewPosition.X > Main.maxTilesX * 16 || args.NewPosition.X < 0
+				|| args.NewPosition.Y > Main.maxTilesY * 16 || args.NewPosition.Y < 0
+				|| float.IsNaN(args.NewPosition.X) || float.IsNaN(args.NewPosition.Y)
+				|| float.IsInfinity(args.NewPosition.X) || float.IsInfinity(args.NewPosition.Y))
 			{
 				TShock.Log.ConsoleDebug(GetString("Bouncer / OnPlayerPortalTeleport rejected teleport out of bounds from {0}", args.Player.Name));
 				args.Handled = true;
 				return;
 			}
 
-			//May as well reject teleport attempts if the player is being throttled
+			if (args.PortalColorIndex < 0 || args.PortalColorIndex > 511)
+			{
+				TShock.Log.ConsoleDebug(GetString("Bouncer / OnPlayerPortalTeleport rejected invalid portal color from {0}", args.Player.Name));
+				args.Handled = true;
+				return;
+			}
+
+			int portalOwner = args.PortalColorIndex / 2;
+			int portalSide = args.PortalColorIndex & 1;
+			var exitPortal = Main.projectile.FirstOrDefault(p => p.active && p.type == ProjectileID.PortalGunGate
+				&& p.owner == portalOwner && (int)p.ai[1] == portalSide);
+			var entryPortal = Main.projectile.FirstOrDefault(p => p.active && p.type == ProjectileID.PortalGunGate
+				&& p.owner == portalOwner && (int)p.ai[1] == 1 - portalSide);
+
+			if (exitPortal == null || entryPortal == null || Vector2.DistanceSquared(args.NewPosition, exitPortal.Center) > 128f * 128f)
+			{
+				TShock.Log.ConsoleDebug(GetString("Bouncer / OnPlayerPortalTeleport rejected teleport without a matching portal pair from {0}", args.Player.Name));
+				args.Handled = true;
+				return;
+			}
+
 			if (args.Player.IsBeingDisabled() || args.Player.IsBouncerThrottled())
 			{
 				TShock.Log.ConsoleDebug(GetString("Bouncer / OnPlayerPortalTeleport rejected disabled/throttled from {0}", args.Player.Name));
@@ -2853,7 +2871,6 @@ namespace TShockAPI
 				return;
 			}
 		}
-
 		/// <summary>Handles the anti-cheat components of gem lock toggles.</summary>
 		/// <param name="sender">The object that triggered the event.</param>
 		/// <param name="args">The packet arguments that the event has.</param>

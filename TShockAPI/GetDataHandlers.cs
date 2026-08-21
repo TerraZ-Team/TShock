@@ -3263,8 +3263,18 @@ namespace TShockAPI
 			var vel = new Vector2(args.Data.ReadSingle(), args.Data.ReadSingle());
 			var stacks = args.Data.ReadInt16();
 			var prefix = args.Data.ReadInt8();
-			var noDelay = args.Data.ReadInt8() == 1;
+			byte itemFlags = (byte)args.Data.ReadByte();
+			BitsByte flags = (BitsByte)itemFlags;
+			// Bits 0-1 encode NewItemOwnership in 1.4.5.7.
+			var noDelay = (itemFlags & 0x03) <= (byte)NewItemOwnership.ReserveForLocalPlayer;
 			var type = args.Data.ReadInt16();
+			if (flags[2])
+			{
+				args.Data.ReadBoolean(); // shimmered
+				args.Data.ReadSingle(); // shimmerTime
+			}
+			if (flags[3])
+				args.Data.ReadByte(); // enemyGrabDelayTime
 
 			if (OnItemDrop(args.Player, args.Data, id, pos, vel, stacks, prefix, noDelay, type))
 				return true;
@@ -3298,10 +3308,12 @@ namespace TShockAPI
 
 		private static bool HandleProjectileNew(GetDataHandlerArgs args)
 		{
-			short ident = args.Data.ReadInt16();
+			// 1.4.5.7 replaces identity + owner with a packed ProjectileKey.
+			ProjectileKey key = (ProjectileKey)args.Data.ReadInt32();
+			short ident = (short)key.Index;
+			byte owner = (byte)key.Spawner;
 			Vector2 pos = args.Data.ReadVector2();
 			Vector2 vel = args.Data.ReadVector2();
-			byte owner = args.Data.ReadInt8();
 			short type = args.Data.ReadInt16();
 			BitsByte bitsByte = (BitsByte)args.Data.ReadByte();
 			BitsByte bitsByte2 = (BitsByte)(bitsByte[2] ? args.Data.ReadByte() : 0);
@@ -3313,11 +3325,18 @@ namespace TShockAPI
 			short dmg = (short)(bitsByte[4] ? args.Data.ReadInt16() : 0);
 			float knockback = bitsByte[5] ? args.Data.ReadSingle() : 0f;
 			short origDmg = (short)(bitsByte[6] ? args.Data.ReadInt16() : 0);
-			short projUUID = (short)(bitsByte[7] ? args.Data.ReadInt16() : -1);
-			if (projUUID >= 1000) projUUID = -1;
 			ai[2] = (bitsByte2[0] ? args.Data.ReadSingle() : 0f);
 
-			var index = TShock.Utils.SearchProjectile(ident, owner);
+			// Vanilla rejects client-created projectiles whose key spawner is not the sender.
+			if (key.Spawner != args.Player.Index)
+			{
+				TShock.Log.ConsoleDebug(GetString("GetDataHandlers / HandleProjectileNew rejected key spawner mismatch {0}", args.Player.Name));
+				return true;
+			}
+
+			// ProjectileKey.Index is the slot. Generation is intentionally left to vanilla
+			// after TShock's checks so a new generation can legitimately replace a stale slot.
+			var index = key.Index;
 
 			// Cattiva's dig ability can bypass build permissions via vanilla exploit in Terraria v1.4.5
 			// Block ai[0] == 3 (dig state)
@@ -3364,28 +3383,45 @@ namespace TShockAPI
 
 		private static bool HandleNpcStrike(GetDataHandlerArgs args)
 		{
-			var id = args.Data.ReadInt16();
+			short id = (short)args.Data.ReadByte();
+			byte generation = (byte)args.Data.ReadByte();
 			var dmg = args.Data.ReadInt16();
 			var knockback = args.Data.ReadSingle();
 			var direction = (byte)(args.Data.ReadInt8() - 1);
 			var crit = args.Data.ReadInt8();
 
-			if (id < 0 || id >= Main.npc.Length)
+			bool AckAndHandle()
 			{
-				TShock.Log.ConsoleDebug(GetString("GetDataHandlers / HandleNpcStrike rejected out of bounds NPC index {0} for {1}",
-					id, args.Player.Name));
+				// Vanilla sends DamageNPCAck before validating the NPC generation.
+				// Only send it here when TShock consumes the packet; otherwise vanilla
+				// will process the packet and send exactly one acknowledgement itself.
+				NetMessage.TrySendData(162, args.Player.Index);
 				return true;
 			}
 
+			if (id >= Main.npc.Length)
+			{
+				TShock.Log.ConsoleDebug(GetString("GetDataHandlers / HandleNpcStrike rejected out of bounds NPC index {0} for {1}",
+					id, args.Player.Name));
+				return AckAndHandle();
+			}
+
+			if (Main.npc[id].generation != generation)
+			{
+				TShock.Log.ConsoleDebug(GetString("GetDataHandlers / HandleNpcStrike ignored stale NPC generation {0} for slot {1} from {2}",
+					generation, id, args.Player.Name));
+				return AckAndHandle();
+			}
+
 			if (OnNPCStrike(args.Player, args.Data, id, direction, dmg, knockback, crit))
-				return true;
+				return AckAndHandle();
 
 			if (Main.npc[id].townNPC && !args.Player.HasPermission(Permissions.hurttownnpc))
 			{
 				args.Player.SendErrorMessage(GetString("You do not have permission to hurt Town NPCs."));
 				args.Player.SendData(PacketTypes.NpcUpdate, "", id);
 				TShock.Log.ConsoleDebug(GetString($"GetDataHandlers / HandleNpcStrike rejected npc strike {args.Player.Name}"));
-				return true;
+				return AckAndHandle();
 			}
 
 			if (Main.npc[id].netID == NPCID.EmpressButterfly)
@@ -3395,7 +3431,7 @@ namespace TShockAPI
 					args.Player.SendErrorMessage(GetString("You do not have permission to summon the Empress of Light."));
 					args.Player.SendData(PacketTypes.NpcUpdate, "", id);
 					TShock.Log.ConsoleDebug(GetString($"GetDataHandlers / HandleNpcStrike rejected EoL summon from {args.Player.Name}"));
-					return true;
+					return AckAndHandle();
 				}
 				else if (!TShock.Config.Settings.AnonymousBossInvasions)
 				{
@@ -3412,18 +3448,27 @@ namespace TShockAPI
 					args.Player.SendErrorMessage(GetString("You do not have permission to summon the Lunatic Cultist!"));
 					args.Player.SendData(PacketTypes.NpcUpdate, "", id);
 					TShock.Log.ConsoleDebug(GetString($"GetDataHandlers / HandleNpcStrike rejected Cultist summon from {args.Player.Name}"));
-					return true;
+					return AckAndHandle();
 				}
 			}
 			return false;
 		}
-
 		private static bool HandleProjectileKill(GetDataHandlerArgs args)
 		{
-			var ident = args.Data.ReadInt16();
-			var owner = args.Data.ReadInt8();
-			owner = (byte)args.Player.Index;
-			var index = TShock.Utils.SearchProjectile(ident, owner);
+			ProjectileKey key = (ProjectileKey)args.Data.ReadInt32();
+			var killPosition = args.Data.ReadVector2();
+			var ident = (short)key.Index;
+			var owner = (byte)key.Spawner;
+			var index = key.Index;
+
+			if (key.Spawner != args.Player.Index)
+			{
+				TShock.Log.ConsoleDebug(GetString("GetDataHandlers / HandleProjectileKill rejected key spawner mismatch {0}", args.Player.Name));
+				return true;
+			}
+
+			if (!key.TryGet(out var projectile) || !projectile.active)
+				return true;
 
 			if (OnProjectileKill(args.Player, args.Data, ident, owner, index))
 			{
@@ -3437,7 +3482,7 @@ namespace TShockAPI
 				return true;
 			}
 
-			short type = (short)Main.projectile[index].type;
+			short type = (short)projectile.type;
 
 			// TODO: This needs to be moved somewhere else.
 
@@ -4251,7 +4296,8 @@ namespace TShockAPI
 		private static bool HandleTeleport(GetDataHandlerArgs args)
 		{
 			BitsByte flag = (BitsByte)args.Data.ReadByte();
-			short id = args.Data.ReadInt16();
+			args.Data.ReadInt16(); // Vanilla ignores the client-supplied entity id on the server.
+			short id = (short)args.Player.Index;
 			Vector2 position = args.Data.ReadVector2();
 			byte style = args.Data.ReadInt8();
 
@@ -4273,42 +4319,31 @@ namespace TShockAPI
 			if (OnTeleport(args.Player, args.Data, id, flag, position.X, position.Y, style, extraInfo))
 				return true;
 
-			//Rod of Discord teleport (usually (may be used by modded clients to teleport))
 			if (type == 0 && !args.Player.HasPermission(Permissions.rod))
 			{
 				TShock.Log.ConsoleDebug(GetString("GetDataHandlers / HandleTeleport rejected rod type {0} {1}", args.Player.Name, type));
-				args.Player.SendErrorMessage(GetString("You do not have permission to teleport using items.")); // Was going to write using RoD but Hook of Disonnance and Potion of Return both use the same teleport packet as RoD.
-				args.Player.Teleport(args.Player.TPlayer.position); // Suggest renaming rod permission unless someone plans to add separate perms for the other 2 tp items.
+				args.Player.SendErrorMessage(GetString("You do not have permission to teleport using items."));
+				args.Player.Teleport(args.Player.TPlayer.position);
 				return true;
 			}
 
-			//NPC teleport
 			if (type == 1 && id >= Main.maxNPCs)
 			{
 				TShock.Log.ConsoleDebug(GetString("GetDataHandlers / HandleTeleport rejected npc teleport {0} {1}", args.Player.Name, type));
 				return true;
 			}
 
-			//Player to player teleport (wormhole potion, usually (may be used by modded clients to teleport))
-			if (type == 2)
+			if (type == 2 && !args.Player.HasPermission(Permissions.wormhole))
 			{
-				if (id >= Main.maxPlayers || Main.player[id] == null || TShock.Players[id] == null)
-				{
-					TShock.Log.ConsoleDebug(GetString("GetDataHandlers / HandleTeleport rejected p2p extents {0} {1}", args.Player.Name, type));
-					return true;
-				}
-
-				if (!args.Player.HasPermission(Permissions.wormhole))
-				{
-					TShock.Log.ConsoleDebug(GetString("GetDataHandlers / HandleTeleport rejected p2p wormhole permission {0} {1}", args.Player.Name, type));
-					args.Player.SendErrorMessage(GetString("You do not have permission to teleport using Wormhole Potions."));
-					args.Player.Teleport(args.Player.TPlayer.position);
-					return true;
-				}
+				TShock.Log.ConsoleDebug(GetString("GetDataHandlers / HandleTeleport rejected p2p wormhole permission {0} {1}", args.Player.Name, type));
+				args.Player.SendErrorMessage(GetString("You do not have permission to teleport using Wormhole Potions."));
+				args.Player.Teleport(args.Player.TPlayer.position);
+				return true;
 			}
+
+			// Type 3 is the acknowledgement for a server-originated player teleport.
 			return false;
 		}
-
 		private static bool HandleHealOther(GetDataHandlerArgs args)
 		{
 			byte plr = args.Data.ReadInt8();
@@ -4322,8 +4357,8 @@ namespace TShockAPI
 
 		private static bool HandleCatchNpc(GetDataHandlerArgs args)
 		{
+			// 1.4.5.7 removed the trailing player byte; the sender is authoritative.
 			var npcID = args.Data.ReadInt16();
-			var who = args.Data.ReadByte();
 
 			if (Main.npc[npcID]?.catchItem == 0)
 			{
@@ -4436,6 +4471,11 @@ namespace TShockAPI
 						return true;
 					}
 					break;
+				case 4: // 1.4.5.7: server-side no-space recovery teleport
+					break;
+				default:
+					TShock.Log.ConsoleDebug(GetString("GetDataHandlers / HandleTeleportationPotion rejected unknown subtype {0} from {1}", type, args.Player.Name));
+					return true;
 			}
 
 			return false;
@@ -4572,25 +4612,23 @@ namespace TShockAPI
 
 		private static bool HandleKillPortal(GetDataHandlerArgs args)
 		{
-			short projectileIndex = args.Data.ReadInt16();
-			args.Data.ReadInt8(); // Read byte projectile AI
+			// Packet 95 carries portal owner + portal side (ai[1]), not a projectile slot.
+			ushort portalOwner = args.Data.ReadUInt16();
+			byte portalSide = (byte)args.Data.ReadByte();
 
-			Projectile projectile = Main.projectile[projectileIndex];
-			if (projectile != null && projectile.active)
+			if (portalOwner >= Main.maxPlayers || portalSide > 1)
 			{
-				if (projectile.owner != args.TPlayer.whoAmI)
-				{
-					TShock.Log.ConsoleDebug(GetString("GetDataHandlers / HandleKillPortal rejected owner mismatch check {0}", args.Player.Name));
-					return true;
-				}
+				TShock.Log.ConsoleDebug(GetString("GetDataHandlers / HandleKillPortal rejected invalid portal key from {0}", args.Player.Name));
+				return true;
 			}
 
+			// Vanilla intentionally sends this when a newly placed portal intersects another player's portal.
 			return false;
 		}
-
 		private static bool HandlePlayerPortalTeleport(GetDataHandlerArgs args)
 		{
-			byte plr = args.Data.ReadInt8();
+			args.Data.ReadInt8(); // Vanilla ignores the client-supplied player id on the server.
+			byte plr = (byte)args.Player.Index;
 			short portalColorIndex = args.Data.ReadInt16();
 			float newPositionX = args.Data.ReadSingle();
 			float newPositionY = args.Data.ReadSingle();
@@ -4606,32 +4644,12 @@ namespace TShockAPI
 				portalColorIndex
 			);
 		}
-
 		private static bool HandleNpcTeleportPortal(GetDataHandlerArgs args)
 		{
-			var npcIndex = args.Data.ReadUInt16();
-			var portalColorIndex = args.Data.ReadInt16();
-			var newPosition = new Vector2(args.Data.ReadSingle(), args.Data.ReadSingle());
-			var velocity = new Vector2(args.Data.ReadSingle(), args.Data.ReadSingle());
-			var projectile = Main.projectile.FirstOrDefault(p => p.position.X == newPosition.X && p.position.Y == newPosition.Y); // Check for projectiles at this location
-
-			if (projectile == null || !projectile.active)
-			{
-				TShock.Log.ConsoleDebug(GetString("GetDataHandlers / HandleNpcTeleportPortal rejected null check {0}", args.Player.Name));
-				NetMessage.SendData((int)PacketTypes.NpcUpdate, -1, -1, NetworkText.Empty, npcIndex);
-				return true;
-			}
-
-			if (projectile.type != ProjectileID.PortalGunGate)
-			{
-				TShock.Log.ConsoleDebug(GetString("GetDataHandlers / HandleNpcTeleportPortal rejected not thinking with portals {0}", args.Player.Name));
-				NetMessage.SendData((int)PacketTypes.NpcUpdate, -1, -1, NetworkText.Empty, npcIndex);
-				return true;
-			}
-
-			return false;
+			// Packet 100 is server-to-client only in vanilla 1.4.5.7.
+			TShock.Log.ConsoleDebug(GetString("GetDataHandlers / HandleNpcTeleportPortal rejected server-only packet from {0}", args.Player.Name));
+			return true;
 		}
-
 		private static bool HandleGemLockToggle(GetDataHandlerArgs args)
 		{
 			var x = args.Data.ReadInt16();
@@ -5246,6 +5264,7 @@ namespace TShockAPI
 			Ping,
 			Ambience,
 			Bestiary,
+			CreativeUnlocks,
 			CreativePowers,
 			CreativeUnlocksPlayerReport,
 			TeleportPylon,
@@ -5253,11 +5272,8 @@ namespace TShockAPI
 			CreativePowerPermissions,
 			Banners,
 			CraftingRequests,
-			TagEffectState,
 			LeashedEntity,
-			UnbreakableWallScan,
-			[Obsolete("Removed in 1.4.5")]
-			CreativeUnlocks
+			UnbreakableWallScan
 		}
 
 		public enum CreativePowerTypes
