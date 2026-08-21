@@ -32,6 +32,16 @@ jobs:
           python-version: '3.12'
       - name: Compare all registered handlers with Terraria 1.4.5.7
         run: python tools/packet_audit.py
+      - name: Trace SSC packet gating
+        run: |
+          echo '=== IgnoreSSCPackets ==='
+          git grep -n 'IgnoreSSCPackets' -- '*.cs' || true
+          echo '=== HasSentInventory ==='
+          git grep -n 'HasSentInventory' -- '*.cs' || true
+          echo '=== packet 22 / ItemOwner sends ==='
+          git grep -n -E 'PacketTypes\.ItemOwner|SendData\(22|TrySendData\(22' -- '*.cs' || true
+          echo '=== SendItemSlotPacketFor ==='
+          git grep -n 'SendItemSlotPacketFor' -- '*.cs' || true
       - name: Add report to job summary
         if: always()
         run: cat packet-audit.md >> "$GITHUB_STEP_SUMMARY"
