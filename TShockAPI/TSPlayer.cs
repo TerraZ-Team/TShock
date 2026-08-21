@@ -1749,10 +1749,19 @@ namespace TShockAPI
 		{
 			using (var ms = new MemoryStream())
 			{
+				var generation = 0;
+				if (index >= 0 && index < Main.maxProjectiles)
+				{
+					var projectile = Main.projectile[index];
+					if (projectile != null && projectile.owner == owner)
+						generation = projectile.key.Generation;
+				}
+
 				var msg = new ProjectileRemoveMsg
 				{
 					Index = (short)index,
-					Owner = (byte)owner
+					Owner = (byte)owner,
+					Generation = generation
 				};
 				msg.PackFull(ms);
 				SendRawData(ms.ToArray());
