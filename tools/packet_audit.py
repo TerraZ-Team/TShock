@@ -65,7 +65,6 @@ def method_body(text: str, name: str) -> str:
 
 
 def packet_cases(message_buffer: str):
-    # The top-level packet switch is `switch (num2)` in GetData(). Extract only that switch.
     switch_pos = message_buffer.find("switch (num2)")
     if switch_pos < 0:
         raise RuntimeError("Could not find packet switch")
@@ -144,7 +143,7 @@ def parse_message_ids(text: str):
 
 def main():
     tshock = pathlib.Path("TShockAPI/GetDataHandlers.cs").read_text(encoding="utf-8-sig")
-    packet_types_text = pathlib.Path("TerrariaServerAPI/TerrariaApi.Server/PacketTypes.cs").read_text(encoding="utf-8-sig")
+    packet_types_text = pathlib.Path("TerrariaServerAPI/TerrariaServerAPI/TerrariaApi.Server/PacketTypes.cs").read_text(encoding="utf-8-sig")
     packet_types = parse_packet_types(packet_types_text)
     registrations = re.findall(r"\{\s*PacketTypes\.(\w+)\s*,\s*(\w+)\s*\}", tshock)
 
@@ -177,12 +176,10 @@ def main():
         else:
             status = "EARLY_DIVERGENCE"
 
-        # Vanilla often overwrites a client-supplied entity/player id with whoAmI.
         vanilla_canonicalizes = "this.whoAmI" in vanilla
         tshock_canonicalizes = ("args.Player.Index" in body or "args.TPlayer.whoAmI" in body)
         canonicalization_flag = vanilla_canonicalizes and not tshock_canonicalizes
 
-        # Heuristic: packets whose vanilla block only performs work in client netmode are server->client.
         client_only_hint = bool(re.search(r"if \(Main\.netMode != 1\)\s*\n\s*break;", vanilla[:350]))
 
         tw, tc = static_width(t_reads)
