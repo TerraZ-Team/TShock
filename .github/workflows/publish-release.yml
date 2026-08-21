@@ -1,0 +1,131 @@
+name: Publish Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  resolve-tag:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve latest tag
+        id: tag
+        shell: bash
+        run: |
+          tag="$(git tag --sort=-version:refname | head -n 1)"
+          if [ -z "$tag" ]; then
+            echo "No git tags found." >&2
+            exit 1
+          fi
+          echo "Publishing latest tag: $tag"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: resolve-tag
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [win-x64, osx-x64, linux-x64, linux-arm64, linux-arm]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve-tag.outputs.tag }}
+          fetch-depth: 0
+          submodules: recursive
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Add MonoMod source
+        run: dotnet nuget add source https://pkgs.dev.azure.com/MonoMod/MonoMod/_packaging/DevBuilds%40Local/nuget/v3/index.json -n DevBuilds@Local
+
+      - name: Install packaging tools
+        run: sudo apt-get update && sudo apt-get install -y gettext zip
+
+      - name: Produce installer
+        run: dotnet publish TShockInstaller/TShockInstaller.csproj -r ${{ matrix.arch }} -f net9.0 -c Release -p:PublishSingleFile=true --self-contained
+
+      - name: Produce server build
+        run: dotnet publish TShockLauncher/TShockLauncher.csproj -r ${{ matrix.arch }} -f net9.0 -c Release -p:PublishSingleFile=true --no-self-contained
+
+      - name: Make Unix launcher executable
+        if: ${{ matrix.arch != 'win-x64' }}
+        run: chmod +x TShockLauncher/bin/Release/net9.0/${{ matrix.arch }}/publish/TShock.Server
+
+      - name: Copy installer into release
+        shell: bash
+        run: cp TShockInstaller/bin/Release/net9.0/${{ matrix.arch }}/publish/* TShockLauncher/bin/Release/net9.0/${{ matrix.arch }}/publish/
+
+      - name: Package release
+        shell: bash
+        env:
+          TAG: ${{ needs.resolve-tag.outputs.tag }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          mkdir -p release-assets
+          publish_dir="TShockLauncher/bin/Release/net9.0/$ARCH/publish"
+          if [ "$ARCH" = "win-x64" ]; then
+            (cd "$publish_dir" && zip -r "../../../../../../release-assets/TShock-$TAG-$ARCH-Release.zip" .)
+          else
+            tar -C "$publish_dir" -czf "release-assets/TShock-$TAG-$ARCH-Release.tar.gz" .
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.arch }}
+          path: release-assets/*
+          if-no-files-found: error
+
+  publish:
+    needs: [resolve-tag, build]
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Publish GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.resolve-tag.outputs.tag }}
+        run: |
+          shopt -s nullglob
+          assets=(release-assets/*)
+          if [ ${#assets[@]} -eq 0 ]; then
+            echo "No release assets were produced." >&2
+            exit 1
+          fi
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "${assets[@]}" --clobber
+            if [[ "$TAG" != *-* ]]; then
+              gh release edit "$TAG" --latest
+            fi
+          else
+            args=(release create "$TAG" "${assets[@]}" --title "TShock $TAG" --generate-notes)
+            if [[ "$TAG" == *-* ]]; then
+              args+=(--prerelease)
+            else
+              args+=(--latest)
+            fi
+            gh "${args[@]}"
+          fi
