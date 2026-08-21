@@ -5,6 +5,7 @@ on:
     branches: [ audit/packet-handlers-1.4.5.7 ]
     paths:
       - tools/packet_audit.py
+      - tools/apply_packet_audit_fixes.py
       - .github/workflows/packet-audit.yml
       - TShockAPI/GetDataHandlers.cs
       - TerrariaServerAPI
@@ -18,7 +19,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   audit:
@@ -30,6 +31,22 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Apply audited packet fixes
+        if: github.event_name == 'push' && !contains(github.event.head_commit.message, 'align packet handlers')
+        run: python tools/apply_packet_audit_fixes.py
+      - name: Commit audited fixes
+        if: github.event_name == 'push' && !contains(github.event.head_commit.message, 'align packet handlers')
+        shell: bash
+        run: |
+          if git diff --quiet -- TShockAPI/GetDataHandlers.cs; then
+            echo "No changes"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- TShockAPI/GetDataHandlers.cs
+          git commit -m "fix: align packet handlers with Terraria 1.4.5.7"
+          git push origin HEAD:audit/packet-handlers-1.4.5.7
       - name: Compare all registered handlers with Terraria 1.4.5.7
         run: python tools/packet_audit.py
       - name: Trace SSC packet gating
