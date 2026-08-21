@@ -3263,8 +3263,18 @@ namespace TShockAPI
 			var vel = new Vector2(args.Data.ReadSingle(), args.Data.ReadSingle());
 			var stacks = args.Data.ReadInt16();
 			var prefix = args.Data.ReadInt8();
-			var noDelay = args.Data.ReadInt8() == 1;
+			byte itemFlags = args.Data.ReadByte();
+			BitsByte flags = (BitsByte)itemFlags;
+			// Bits 0-1 encode NewItemOwnership in 1.4.5.7.
+			var noDelay = (itemFlags & 0x03) <= (byte)NewItemOwnership.ReserveForLocalPlayer;
 			var type = args.Data.ReadInt16();
+			if (flags[2])
+			{
+				args.Data.ReadBoolean(); // shimmered
+				args.Data.ReadSingle(); // shimmerTime
+			}
+			if (flags[3])
+				args.Data.ReadByte(); // enemyGrabDelayTime
 
 			if (OnItemDrop(args.Player, args.Data, id, pos, vel, stacks, prefix, noDelay, type))
 				return true;
@@ -3298,10 +3308,12 @@ namespace TShockAPI
 
 		private static bool HandleProjectileNew(GetDataHandlerArgs args)
 		{
-			short ident = args.Data.ReadInt16();
+			// 1.4.5.7 replaces identity + owner with a packed ProjectileKey.
+			ProjectileKey key = (ProjectileKey)args.Data.ReadInt32();
+			short ident = (short)key.Index;
+			byte owner = (byte)key.Spawner;
 			Vector2 pos = args.Data.ReadVector2();
 			Vector2 vel = args.Data.ReadVector2();
-			byte owner = args.Data.ReadInt8();
 			short type = args.Data.ReadInt16();
 			BitsByte bitsByte = (BitsByte)args.Data.ReadByte();
 			BitsByte bitsByte2 = (BitsByte)(bitsByte[2] ? args.Data.ReadByte() : 0);
@@ -3313,11 +3325,18 @@ namespace TShockAPI
 			short dmg = (short)(bitsByte[4] ? args.Data.ReadInt16() : 0);
 			float knockback = bitsByte[5] ? args.Data.ReadSingle() : 0f;
 			short origDmg = (short)(bitsByte[6] ? args.Data.ReadInt16() : 0);
-			short projUUID = (short)(bitsByte[7] ? args.Data.ReadInt16() : -1);
-			if (projUUID >= 1000) projUUID = -1;
 			ai[2] = (bitsByte2[0] ? args.Data.ReadSingle() : 0f);
 
-			var index = TShock.Utils.SearchProjectile(ident, owner);
+			// Vanilla rejects client-created projectiles whose key spawner is not the sender.
+			if (key.Spawner != args.Player.Index)
+			{
+				TShock.Log.ConsoleDebug(GetString("GetDataHandlers / HandleProjectileNew rejected key spawner mismatch {0}", args.Player.Name));
+				return true;
+			}
+
+			// ProjectileKey.Index is the slot. Generation is intentionally left to vanilla
+			// after TShock's checks so a new generation can legitimately replace a stale slot.
+			var index = key.Index;
 
 			// Cattiva's dig ability can bypass build permissions via vanilla exploit in Terraria v1.4.5
 			// Block ai[0] == 3 (dig state)
@@ -3364,16 +3383,27 @@ namespace TShockAPI
 
 		private static bool HandleNpcStrike(GetDataHandlerArgs args)
 		{
-			var id = args.Data.ReadInt16();
+			// Vanilla acknowledges every inbound strike before validating the NPC generation.
+			NetMessage.SendData(162, args.Player.Index);
+
+			var id = (int)args.Data.ReadByte();
+			var generation = args.Data.ReadByte();
 			var dmg = args.Data.ReadInt16();
 			var knockback = args.Data.ReadSingle();
 			var direction = (byte)(args.Data.ReadInt8() - 1);
 			var crit = args.Data.ReadInt8();
 
-			if (id < 0 || id >= Main.npc.Length)
+			if (id >= Main.npc.Length)
 			{
 				TShock.Log.ConsoleDebug(GetString("GetDataHandlers / HandleNpcStrike rejected out of bounds NPC index {0} for {1}",
 					id, args.Player.Name));
+				return true;
+			}
+
+			if (Main.npc[id].generation != generation)
+			{
+				TShock.Log.ConsoleDebug(GetString("GetDataHandlers / HandleNpcStrike ignored stale NPC generation {0} for slot {1} from {2}",
+					generation, id, args.Player.Name));
 				return true;
 			}
 
@@ -3420,10 +3450,20 @@ namespace TShockAPI
 
 		private static bool HandleProjectileKill(GetDataHandlerArgs args)
 		{
-			var ident = args.Data.ReadInt16();
-			var owner = args.Data.ReadInt8();
-			owner = (byte)args.Player.Index;
-			var index = TShock.Utils.SearchProjectile(ident, owner);
+			ProjectileKey key = (ProjectileKey)args.Data.ReadInt32();
+			var killPosition = args.Data.ReadVector2();
+			var ident = (short)key.Index;
+			var owner = (byte)key.Spawner;
+			var index = key.Index;
+
+			if (key.Spawner != args.Player.Index)
+			{
+				TShock.Log.ConsoleDebug(GetString("GetDataHandlers / HandleProjectileKill rejected key spawner mismatch {0}", args.Player.Name));
+				return true;
+			}
+
+			if (!key.TryGet(out var projectile) || !projectile.active)
+				return true;
 
 			if (OnProjectileKill(args.Player, args.Data, ident, owner, index))
 			{
@@ -3437,7 +3477,7 @@ namespace TShockAPI
 				return true;
 			}
 
-			short type = (short)Main.projectile[index].type;
+			short type = (short)projectile.type;
 
 			// TODO: This needs to be moved somewhere else.
 
@@ -4322,8 +4362,8 @@ namespace TShockAPI
 
 		private static bool HandleCatchNpc(GetDataHandlerArgs args)
 		{
+			// 1.4.5.7 removed the trailing player byte; the sender is authoritative.
 			var npcID = args.Data.ReadInt16();
-			var who = args.Data.ReadByte();
 
 			if (Main.npc[npcID]?.catchItem == 0)
 			{
@@ -5246,6 +5286,7 @@ namespace TShockAPI
 			Ping,
 			Ambience,
 			Bestiary,
+			CreativeUnlocks,
 			CreativePowers,
 			CreativeUnlocksPlayerReport,
 			TeleportPylon,
@@ -5253,11 +5294,8 @@ namespace TShockAPI
 			CreativePowerPermissions,
 			Banners,
 			CraftingRequests,
-			TagEffectState,
 			LeashedEntity,
-			UnbreakableWallScan,
-			[Obsolete("Removed in 1.4.5")]
-			CreativeUnlocks
+			UnbreakableWallScan
 		}
 
 		public enum CreativePowerTypes
