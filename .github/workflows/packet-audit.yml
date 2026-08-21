@@ -8,6 +8,13 @@ on:
       - .github/workflows/packet-audit.yml
       - TShockAPI/GetDataHandlers.cs
       - TerrariaServerAPI
+  pull_request:
+    branches: [ general-devel ]
+    paths:
+      - tools/packet_audit.py
+      - .github/workflows/packet-audit.yml
+      - TShockAPI/GetDataHandlers.cs
+      - TerrariaServerAPI
   workflow_dispatch:
 
 permissions:
