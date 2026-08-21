@@ -1,0 +1,223 @@
+name: Apply Terraria 1.4.5.7 protocol port
+
+on:
+  push:
+    branches:
+      - update/terraria-1.4.5.7
+    paths:
+      - .github/workflows/port-1457.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-port:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: update/terraria-1.4.5.7
+          fetch-depth: 0
+
+      - name: Apply validated protocol changes
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path("TShockAPI/GetDataHandlers.cs")
+          text = path.read_text(encoding="utf-8-sig")
+
+          def replace_once(old: str, new: str, label: str):
+              global text
+              count = text.count(old)
+              if count != 1:
+                  raise RuntimeError(f"{label}: expected exactly one match, got {count}")
+              text = text.replace(old, new, 1)
+
+          replace_once(
+          '''\t\t\tvar prefix = args.Data.ReadInt8();
+          \t\t\tvar noDelay = args.Data.ReadInt8() == 1;
+          \t\t\tvar type = args.Data.ReadInt16();''',
+          '''\t\t\tvar prefix = args.Data.ReadInt8();
+          \t\t\tbyte itemFlags = args.Data.ReadByte();
+          \t\t\tBitsByte flags = (BitsByte)itemFlags;
+          \t\t\t// Bits 0-1 encode NewItemOwnership in 1.4.5.7.
+          \t\t\tvar noDelay = (itemFlags & 0x03) <= (byte)NewItemOwnership.ReserveForLocalPlayer;
+          \t\t\tvar type = args.Data.ReadInt16();
+          \t\t\tif (flags[2])
+          \t\t\t{
+          \t\t\t\targs.Data.ReadBoolean(); // shimmered
+          \t\t\t\targs.Data.ReadSingle(); // shimmerTime
+          \t\t\t}
+          \t\t\tif (flags[3])
+          \t\t\t\targs.Data.ReadByte(); // enemyGrabDelayTime''',
+          "item packet")
+
+          replace_once(
+          '''\t\t\tshort ident = args.Data.ReadInt16();
+          \t\t\tVector2 pos = args.Data.ReadVector2();
+          \t\t\tVector2 vel = args.Data.ReadVector2();
+          \t\t\tbyte owner = args.Data.ReadInt8();''',
+          '''\t\t\t// 1.4.5.7 replaces identity + owner with a packed ProjectileKey.
+          \t\t\tProjectileKey key = (ProjectileKey)args.Data.ReadInt32();
+          \t\t\tshort ident = (short)key.Index;
+          \t\t\tbyte owner = (byte)key.Spawner;
+          \t\t\tVector2 pos = args.Data.ReadVector2();
+          \t\t\tVector2 vel = args.Data.ReadVector2();''',
+          "projectile new header")
+
+          replace_once(
+          '''\t\t\tshort origDmg = (short)(bitsByte[6] ? args.Data.ReadInt16() : 0);
+          \t\t\tshort projUUID = (short)(bitsByte[7] ? args.Data.ReadInt16() : -1);
+          \t\t\tif (projUUID >= 1000) projUUID = -1;
+          \t\t\tai[2] = (bitsByte2[0] ? args.Data.ReadSingle() : 0f);
+
+          \t\t\tvar index = TShock.Utils.SearchProjectile(ident, owner);''',
+          '''\t\t\tshort origDmg = (short)(bitsByte[6] ? args.Data.ReadInt16() : 0);
+          \t\t\tai[2] = (bitsByte2[0] ? args.Data.ReadSingle() : 0f);
+
+          \t\t\t// Vanilla rejects client-created projectiles whose key spawner is not the sender.
+          \t\t\tif (key.Spawner != args.Player.Index)
+          \t\t\t{
+          \t\t\t\tTShock.Log.ConsoleDebug(GetString("GetDataHandlers / HandleProjectileNew rejected key spawner mismatch {0}", args.Player.Name));
+          \t\t\t\treturn true;
+          \t\t\t}
+
+          \t\t\t// ProjectileKey.Index is the slot. Generation is intentionally left to vanilla
+          \t\t\t// after TShock's checks so a new generation can legitimately replace a stale slot.
+          \t\t\tvar index = key.Index;''',
+          "projectile new key")
+
+          replace_once(
+          '''\t\tprivate static bool HandleNpcStrike(GetDataHandlerArgs args)
+          \t\t{
+          \t\t\tvar id = args.Data.ReadInt16();
+          \t\t\tvar dmg = args.Data.ReadInt16();
+          \t\t\tvar knockback = args.Data.ReadSingle();
+          \t\t\tvar direction = (byte)(args.Data.ReadInt8() - 1);
+          \t\t\tvar crit = args.Data.ReadInt8();
+
+          \t\t\tif (id < 0 || id >= Main.npc.Length)
+          \t\t\t{
+          \t\t\t\tTShock.Log.ConsoleDebug(GetString("GetDataHandlers / HandleNpcStrike rejected out of bounds NPC index {0} for {1}",
+          \t\t\t\t\tid, args.Player.Name));
+          \t\t\t\treturn true;
+          \t\t\t}
+
+          \t\t\tif (OnNPCStrike(args.Player, args.Data, id, direction, dmg, knockback, crit))''',
+          '''\t\tprivate static bool HandleNpcStrike(GetDataHandlerArgs args)
+          \t\t{
+          \t\t\t// Vanilla acknowledges every inbound strike before validating the NPC generation.
+          \t\t\tNetMessage.SendData(162, args.Player.Index);
+
+          \t\t\tvar id = (int)args.Data.ReadByte();
+          \t\t\tvar generation = args.Data.ReadByte();
+          \t\t\tvar dmg = args.Data.ReadInt16();
+          \t\t\tvar knockback = args.Data.ReadSingle();
+          \t\t\tvar direction = (byte)(args.Data.ReadInt8() - 1);
+          \t\t\tvar crit = args.Data.ReadInt8();
+
+          \t\t\tif (id >= Main.npc.Length)
+          \t\t\t{
+          \t\t\t\tTShock.Log.ConsoleDebug(GetString("GetDataHandlers / HandleNpcStrike rejected out of bounds NPC index {0} for {1}",
+          \t\t\t\t\tid, args.Player.Name));
+          \t\t\t\treturn true;
+          \t\t\t}
+
+          \t\t\tif (Main.npc[id].generation != generation)
+          \t\t\t{
+          \t\t\t\tTShock.Log.ConsoleDebug(GetString("GetDataHandlers / HandleNpcStrike ignored stale NPC generation {0} for slot {1} from {2}",
+          \t\t\t\t\tgeneration, id, args.Player.Name));
+          \t\t\t\treturn true;
+          \t\t\t}
+
+          \t\t\tif (OnNPCStrike(args.Player, args.Data, id, direction, dmg, knockback, crit))''',
+          "npc strike")
+
+          replace_once(
+          '''\t\tprivate static bool HandleProjectileKill(GetDataHandlerArgs args)
+          \t\t{
+          \t\t\tvar ident = args.Data.ReadInt16();
+          \t\t\tvar owner = args.Data.ReadInt8();
+          \t\t\towner = (byte)args.Player.Index;
+          \t\t\tvar index = TShock.Utils.SearchProjectile(ident, owner);
+
+          \t\t\tif (OnProjectileKill(args.Player, args.Data, ident, owner, index))''',
+          '''\t\tprivate static bool HandleProjectileKill(GetDataHandlerArgs args)
+          \t\t{
+          \t\t\tProjectileKey key = (ProjectileKey)args.Data.ReadInt32();
+          \t\t\tvar killPosition = args.Data.ReadVector2();
+          \t\t\tvar ident = (short)key.Index;
+          \t\t\tvar owner = (byte)key.Spawner;
+          \t\t\tvar index = key.Index;
+
+          \t\t\tif (key.Spawner != args.Player.Index)
+          \t\t\t{
+          \t\t\t\tTShock.Log.ConsoleDebug(GetString("GetDataHandlers / HandleProjectileKill rejected key spawner mismatch {0}", args.Player.Name));
+          \t\t\t\treturn true;
+          \t\t\t}
+
+          \t\t\tif (!key.TryGet(out var projectile) || !projectile.active)
+          \t\t\t\treturn true;
+
+          \t\t\tif (OnProjectileKill(args.Player, args.Data, ident, owner, index))''',
+          "projectile kill header")
+
+          replace_once(
+          '''\t\t\tshort type = (short)Main.projectile[index].type;''',
+          '''\t\t\tshort type = (short)projectile.type;''',
+          "projectile kill type")
+
+          replace_once(
+          '''\t\t\tvar npcID = args.Data.ReadInt16();
+          \t\t\tvar who = args.Data.ReadByte();''',
+          '''\t\t\t// 1.4.5.7 removed the trailing player byte; the sender is authoritative.
+          \t\t\tvar npcID = args.Data.ReadInt16();''',
+          "catch npc")
+
+          replace_once(
+          '''\t\t\tPing,
+          \t\t\tAmbience,
+          \t\t\tBestiary,
+          \t\t\tCreativePowers,
+          \t\t\tCreativeUnlocksPlayerReport,
+          \t\t\tTeleportPylon,
+          \t\t\tParticles,
+          \t\t\tCreativePowerPermissions,
+          \t\t\tBanners,
+          \t\t\tCraftingRequests,
+          \t\t\tTagEffectState,
+          \t\t\tLeashedEntity,
+          \t\t\tUnbreakableWallScan,
+          \t\t\t[Obsolete("Removed in 1.4.5")]
+          \t\t\tCreativeUnlocks''',
+          '''\t\t\tPing,
+          \t\t\tAmbience,
+          \t\t\tBestiary,
+          \t\t\tCreativeUnlocks,
+          \t\t\tCreativePowers,
+          \t\t\tCreativeUnlocksPlayerReport,
+          \t\t\tTeleportPylon,
+          \t\t\tParticles,
+          \t\t\tCreativePowerPermissions,
+          \t\t\tBanners,
+          \t\t\tCraftingRequests,
+          \t\t\tLeashedEntity,
+          \t\t\tUnbreakableWallScan''',
+          "net module order")
+
+          path.write_text(text, encoding="utf-8-sig")
+
+      - name: Verify patch
+        run: |
+          git diff --check
+          git diff -- TShockAPI/GetDataHandlers.cs
+
+      - name: Commit protocol port and remove helper workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm -- .github/workflows/port-1457.yml
+          git add -- TShockAPI/GetDataHandlers.cs
+          git commit -m "Port Terraria 1.4.5.7 protocol handling"
+          git push origin HEAD:update/terraria-1.4.5.7
