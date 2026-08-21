@@ -1,0 +1,37 @@
+name: Packet handler audit
+
+on:
+  push:
+    branches: [ audit/packet-handlers-1.4.5.7 ]
+    paths:
+      - tools/packet_audit.py
+      - .github/workflows/packet-audit.yml
+      - TShockAPI/GetDataHandlers.cs
+      - TerrariaServerAPI
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compare all registered handlers with Terraria 1.4.5.7
+        run: python tools/packet_audit.py
+      - name: Add report to job summary
+        if: always()
+        run: cat packet-audit.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: packet-audit
+          path: |
+            packet-audit.md
+            packet-audit.json
