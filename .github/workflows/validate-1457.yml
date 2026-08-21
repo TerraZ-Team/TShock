@@ -9,7 +9,7 @@ on:
       - .github/workflows/validate-1457.yml
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   validate:
@@ -17,7 +17,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: update/terraria-1.4.5.7
           submodules: recursive
+          fetch-depth: 0
+
+      - name: Apply protocol and teleport fixes
+        run: python .github/apply-1457-fixes.py
+
+      - name: Check and persist fixes
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add TShockAPI/GetDataHandlers.cs TShockAPI/TSPlayer.cs TShockAPI/Bouncer.cs
+          git diff --cached --check
+          if ! git diff --cached --quiet; then
+            git commit -m "fix: align 1.4.5.7 protocol and teleport handling"
+            git push origin HEAD:update/terraria-1.4.5.7
+          fi
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
