@@ -18,6 +18,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading;
@@ -30,6 +31,10 @@ namespace TShockAPI.Sockets
 {
 	public class LinuxTcpSocket : ISocket
 	{
+		private const int KeepAliveTimeSeconds = 60;
+		private const int KeepAliveIntervalSeconds = 15;
+		private const int KeepAliveRetryCount = 4;
+
 		public byte[] _packetBuffer = new byte[1024];
 
 		public int _packetBufferLength;
@@ -59,15 +64,53 @@ namespace TShockAPI.Sockets
 		public LinuxTcpSocket()
 		{
 			this._connection = new TcpClient();
-			this._connection.NoDelay = true;
+			ConfigureConnection(this._connection);
 		}
 
 		public LinuxTcpSocket(TcpClient tcpClient)
 		{
 			this._connection = tcpClient;
-			this._connection.NoDelay = true;
+			ConfigureConnection(this._connection);
 			IPEndPoint iPEndPoint = (IPEndPoint)tcpClient.Client.RemoteEndPoint;
 			this._remoteAddress = new TcpAddress(iPEndPoint.Address, iPEndPoint.Port);
+		}
+
+		private static void ConfigureConnection(TcpClient connection)
+		{
+			connection.NoDelay = true;
+
+			Socket socket = connection.Client;
+			if (socket == null)
+				return;
+
+			try
+			{
+				socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, true);
+			}
+			catch (SocketException)
+			{
+			}
+			catch (PlatformNotSupportedException)
+			{
+			}
+
+			TrySetTcpKeepAliveOption(socket, SocketOptionName.TcpKeepAliveTime, KeepAliveTimeSeconds);
+			TrySetTcpKeepAliveOption(socket, SocketOptionName.TcpKeepAliveInterval, KeepAliveIntervalSeconds);
+			TrySetTcpKeepAliveOption(socket, SocketOptionName.TcpKeepAliveRetryCount, KeepAliveRetryCount);
+		}
+
+		private static void TrySetTcpKeepAliveOption(Socket socket, SocketOptionName optionName, int value)
+		{
+			try
+			{
+				socket.SetSocketOption(SocketOptionLevel.Tcp, optionName, value);
+			}
+			catch (SocketException)
+			{
+			}
+			catch (PlatformNotSupportedException)
+			{
+			}
 		}
 
 		void ISocket.Close()
@@ -78,13 +121,33 @@ namespace TShockAPI.Sockets
 
 		bool ISocket.IsConnected()
 		{
-			return this._connection != null && this._connection.Client != null && this._connection.Connected;
+			try
+			{
+				if (this._connection == null || this._connection.Client == null || !this._connection.Connected)
+					return false;
+
+				Socket socket = this._connection.Client;
+				return !(socket.Poll(0, SelectMode.SelectRead) && socket.Available == 0);
+			}
+			catch (ObjectDisposedException)
+			{
+				return false;
+			}
+			catch (SocketException)
+			{
+				return false;
+			}
+			catch (InvalidOperationException)
+			{
+				return false;
+			}
 		}
 
 		void ISocket.Connect(RemoteAddress address)
 		{
 			TcpAddress tcpAddress = (TcpAddress)address;
 			this._connection.Connect(tcpAddress.Address, tcpAddress.Port);
+			ConfigureConnection(this._connection);
 			this._remoteAddress = address;
 		}
 
@@ -96,14 +159,13 @@ namespace TShockAPI.Sockets
 			{
 				tuple.Item1(tuple.Item2, this._connection.GetStream().EndRead(result));
 			}
-			catch (InvalidOperationException)
-			{
-				// This is common behaviour during client disconnects
-				((ISocket)this).Close();
-			}
 			catch (Exception ex)
 			{
-				TShock.Log.Error(ex.ToString());
+				if (ex is not InvalidOperationException && TShock.Log != null)
+					TShock.Log.Error(ex.ToString());
+
+				((ISocket)this).Close();
+				tuple.Item1(tuple.Item2, 0);
 			}
 		}
 
@@ -140,7 +202,18 @@ namespace TShockAPI.Sockets
 
 		bool ISocket.IsDataAvailable()
 		{
-			return this._connection.GetStream().DataAvailable;
+			try
+			{
+				return ((ISocket)this).IsConnected() && this._connection.GetStream().DataAvailable;
+			}
+			catch (ObjectDisposedException)
+			{
+				return false;
+			}
+			catch (IOException)
+			{
+				return false;
+			}
 		}
 
 		RemoteAddress ISocket.GetRemoteAddress()
