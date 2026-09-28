@@ -36,6 +36,7 @@ using Timer = System.Timers.Timer;
 using System.Linq;
 using Terraria.GameContent;
 using Terraria.GameContent.Creative;
+using Terraria.GameContent.Events;
 namespace TShockAPI
 {
 	/// <summary>
@@ -1741,22 +1742,53 @@ namespace TShockAPI
 		}
 
 		/// <summary>
+		/// If the player is allowed to skip the respawn timer. Does not account for time spent being dead in case of network lag.
+		/// </summary>
+		public bool CanSkipRespawnTimer()
+		{
+			if (TPlayer.ghost)
+				return false;
+
+			if (TPlayer.pvpDeath)
+				return false;
+
+			if (TPlayer.NearAnyNPCsThatBlockRespawn())
+				return false;
+
+			if (TPlayer.AnyBossHindersRespawnTime())
+				return false;
+
+			if (Main.snowMoon || Main.pumpkinMoon || DD2Event.Ongoing)
+				return false;
+
+			return true;
+		}
+
+		/// <summary>
 		/// Removes the projectile with the given index and owner.
 		/// </summary>
 		/// <param name="index">The projectile's index.</param>
 		/// <param name="owner">The projectile's owner.</param>
 		public void RemoveProjectile(int index, int owner)
 		{
+			int generation = 0;
+			int slot = TShock.Utils.SearchProjectile((short)index, owner);
+			if (slot >= 0 && slot < Main.maxProjectiles)
+				generation = Main.projectile[slot].key.Generation;
+
+			RemoveProjectile(index, owner, generation);
+		}
+
+		/// <summary>
+		/// Removes a projectile whose generation is already known, typically taken from the packet.
+		/// </summary>
+		/// <param name="index">The projectile's identity.</param>
+		/// <param name="owner">The player index of the projectile's owner.</param>
+		/// <param name="generation">Slot-reuse counter from the sender's ProjectileKey.</param>
+		public void RemoveProjectile(int index, int owner, int generation)
+		{
 			using (var ms = new MemoryStream())
 			{
-				var generation = 0;
-				if (index >= 0 && index < Main.maxProjectiles)
-				{
-					var projectile = Main.projectile[index];
-					if (projectile != null && projectile.owner == owner)
-						generation = projectile.key.Generation;
-				}
-
 				var msg = new ProjectileRemoveMsg
 				{
 					Index = (short)index,
