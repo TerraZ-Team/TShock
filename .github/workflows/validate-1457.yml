@@ -42,7 +42,8 @@ jobs:
       - name: Verify package version
         shell: pwsh
         run: |
-          $package = Get-ChildItem artifacts/nuget/TZ.TShockAPI.6.1.3.nupkg | Select-Object -First 1
-          if (-not $package) {
-            throw "TZ.TShockAPI 6.1.3 package was not produced."
+          [xml]$project = Get-Content TShockAPI/TShockAPI.csproj
+          $version = $project.Project.PropertyGroup.PackageVersion | Select-Object -First 1
+          if (-not (Test-Path "artifacts/nuget/TZ.TShockAPI.$version.nupkg")) {
+            throw "TZ.TShockAPI $version package was not produced."
           }
