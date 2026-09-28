@@ -47,3 +47,12 @@ jobs:
           if (-not (Test-Path "artifacts/nuget/TZ.TShockAPI.$version.nupkg")) {
             throw "TZ.TShockAPI $version package was not produced."
           }
+
+      - name: Upload TSAPI and TShockAPI assemblies
+        uses: actions/upload-artifact@v4
+        with:
+          name: TerraZ-TShockAPI-TSAPI-6.2.1
+          if-no-files-found: error
+          path: |
+            TShockAPI/bin/Release/net9.0/TShockAPI.dll
+            TerrariaServerAPI/TerrariaServerAPI/bin/Release/net9.0/TerrariaServer.dll
