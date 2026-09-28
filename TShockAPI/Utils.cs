@@ -779,10 +779,17 @@ namespace TShockAPI
 		/// <returns>projectile ID</returns>
 		public int SearchProjectile(short identity, int owner)
 		{
-			// 1.4.5.7 replaced Projectile.identity with ProjectileKey, whose index component
-			// is the slot in Main.projectile, so the lookup is direct.
-			if (identity >= 0 && identity < Main.maxProjectiles && Main.projectile[identity].owner == owner)
-				return identity;
+			if (identity < 0 || identity >= 1000 || owner < 0 || owner > 255)
+				return 1000;
+
+			int index = Projectile.keyToIndex[owner, identity];
+			if (index < 0 || index >= Main.maxProjectiles)
+				return 1000;
+
+			// Entries remain in keyToIndex after a projectile slot is reused.
+			var key = Main.projectile[index].key;
+			if (key.Spawner == owner && key.Index == identity)
+				return index;
 			return 1000;
 		}
 
