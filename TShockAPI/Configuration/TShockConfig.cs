@@ -483,6 +483,10 @@ namespace TShockAPI.Configuration
 		[Description("The maximum allowed length for chat messages. Valid range: 250 characters to 2000 characters.")]
 		public int MaximumChatMessageLength = 500;
 
+		/// <summary>Allows players to use [ct:] tags in chat.</summary>
+		[Description("Allows players to use [ct:] tags in chat. Invalid tags can crash mobile clients.")]
+		public bool AllowCtTag = false;
+
 		/// <summary>If a chat message that exceeds MaximumChatMessageLength should be truncated or rejected.</summary>
 		[Description("If a chat message that exceeds MaximumChatMessageLength should be truncated or rejected.")]
 		public bool TruncateExcessiveChatMessages = false;

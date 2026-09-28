@@ -1789,14 +1789,6 @@ namespace TShockAPI
 		{
 			using (var ms = new MemoryStream())
 			{
-				var generation = 0;
-				if (index >= 0 && index < Main.maxProjectiles)
-				{
-					var projectile = Main.projectile[index];
-					if (projectile != null && projectile.owner == owner)
-						generation = projectile.key.Generation;
-				}
-
 				var msg = new ProjectileRemoveMsg
 				{
 					Index = (short)index,
